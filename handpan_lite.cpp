@@ -16,12 +16,7 @@
 #define NUM_VOICES 4
 #define MODES_PER_NOTE 3
 #define SAMPLE_RATE NT_globals.sampleRate
-#define AUDIO_IN_TRIGGER1 0
-#define AUDIO_IN_TRIGGER2 1
-#define CV_IN_1 2
-#define CV_IN_2 3
-#define AUDIO_OUT_BUS_L 13
-#define AUDIO_OUT_BUS_R 14
+
 
 struct Mode {
     float freq;
@@ -41,12 +36,18 @@ struct HandpanLite : _NT_algorithm {
 };
 
 static const _NT_parameter parameters[] = {
+    NT_PARAMETER_AUDIO_INPUT("Trigger 1"),
+    NT_PARAMETER_AUDIO_INPUT("Trigger 2"),
+    NT_PARAMETER_AUDIO_INPUT("CV 1"),
+    NT_PARAMETER_AUDIO_INPUT("CV 2"),
+    NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output L"),
+    NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output R"),
     { "Decay", 100, 5000, 1000, kNT_unitMs, kNT_scalingNone, nullptr }
 };
 
-static const uint8_t pageParams[] = { 0 };
+static const uint8_t pageParams[] = { 0, 1, 2, 3, 4, 5, 6 };
 static const _NT_parameterPage pages[] = {
-    { "Global", ARRAY_SIZE(pageParams), pageParams }
+    { "IO & Decay", ARRAY_SIZE(pageParams), pageParams }
 };
 static const _NT_parameterPages parameterPages = { ARRAY_SIZE(pages), pages };
 
@@ -67,32 +68,30 @@ extern "C" _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs, const _
 extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     HandpanLite* self = static_cast<HandpanLite*>(base);
     int numFrames = numFramesBy4 * 4;
-    float* trig1 = busFrames + AUDIO_IN_TRIGGER1 * numFrames;
-    float* trig2 = busFrames + AUDIO_IN_TRIGGER2 * numFrames;
-    float* cv1 = busFrames + CV_IN_1 * numFrames;
-    float* cv2 = busFrames + CV_IN_2 * numFrames;
-    float* outL = busFrames + AUDIO_OUT_BUS_L * numFrames;
-    float* outR = busFrames + AUDIO_OUT_BUS_R * numFrames;
+
+    float* trig1 = _NT_getAudioInput(self, 0, busFrames, numFrames);
+    float* trig2 = _NT_getAudioInput(self, 1, busFrames, numFrames);
+    float* cv1 = _NT_getAudioInput(self, 2, busFrames, numFrames);
+    float* cv2 = _NT_getAudioInput(self, 3, busFrames, numFrames);
+    float* outL = _NT_getAudioOutput(self, 4, busFrames, numFrames);
+    float* outR = _NT_getAudioOutput(self, 5, busFrames, numFrames);
     memset(outL, 0, numFrames * sizeof(float));
     memset(outR, 0, numFrames * sizeof(float));
 
-    const float decay = self->v[0] / 1000.0f;
+    const float decay = self->v[6] / 1000.0f;
 
     for (int f = 0; f < numFrames; ++f) {
         if (trig1[f] > 0.5f || trig2[f] > 0.5f) {
-            // Suche nächste freie Stimme
             for (int v = 0; v < NUM_VOICES; ++v) {
                 if (!self->voices[v].active) {
                     float cv = (trig1[f] > 0.5f) ? cv1[f] : cv2[f];
                     float freqBase = cvToFreq(cv);
 
                     for (int m = 0; m < MODES_PER_NOTE; ++m) {
-                        self->voices[v].modes[m] = {
-                            freqBase * (m + 1),
-                            0.0f,
-                            1.0f,
-                            decay
-                        };
+                        self->voices[v].modes[m].freq = freqBase * (m + 1);
+                        self->voices[v].modes[m].phase = 0.0f;
+                        self->voices[v].modes[m].amplitude = 1.0f;
+                        self->voices[v].modes[m].decay = decay;
                     }
                     self->voices[v].active = true;
                     self->voices[v].age = 0.0f;
@@ -135,6 +134,7 @@ extern "C" void calculateRequirements(_NT_algorithmRequirements& req, const int3
     req.dtc = 0;
     req.itc = 0;
 }
+
 
 
 
