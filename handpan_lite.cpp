@@ -46,7 +46,7 @@ static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("CV 2",1,4)
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output L",1,13)
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output R",1,14)
-    { "Decay", 100, 5000, 1000, kNT_unitMs, kNT_scalingNone, nullptr }
+    { .name = "Decay", .min = 100, .max = 5000, .def = 1000, .unit = kNT_unitMs, .scaling = kNT_scalingNone, .enumStrings = NULL },
 };
 inline float* _NT_getAudioInput(_NT_algorithm* self, int index, float* busFrames, int numFrames) {
     int bus = self->v[index];
