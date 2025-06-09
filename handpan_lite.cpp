@@ -90,7 +90,7 @@ inline float* _NT_getAudioInput(_NT_algorithm* self, int index, float* busFrames
 }
 
 inline float* _NT_getAudioOutput(_NT_algorithm* self, int index, float* busFrames, int numFrames) {
-    int bus = self->v[index];
+    int bus = self->v[index] - 1;   // Adjust for 0-based indexing
     return busFrames + bus * numFrames;
 }
 
