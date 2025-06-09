@@ -45,7 +45,9 @@ enum
     kParamAudioInputCV1,
     kParamAudioInputCV2,
     kParamAudioOutputL,
+    kParamOutputmodeL,
     kParamAudioOutputR,
+    kParamOutputmodeR,
     kParamDecay,
    
 
@@ -66,7 +68,7 @@ static const _NT_parameter parameters[] = {
 
 
 static const uint8_t Page1[] = { kParamDecay};
-static const uint8_t Page2[] = { kParamAudioInputTrigger1, kParamAudioInputTrigger2, kParamAudioInputCV1, kParamAudioInputCV2, kParamAudioOutputL, kParamAudioOutputR };
+static const uint8_t Page2[] = { kParamAudioInputTrigger1, kParamAudioInputTrigger2, kParamAudioInputCV1, kParamAudioInputCV2, kParamAudioOutputL, kParamOutputmodeL, kParamAudioOutputR, kParamOutputmodeR };
 static const _NT_parameterPage ioPageParams = { "Inputs/Outputs", ARRAY_SIZE(Page2), Page2 };
 static const _NT_parameterPage decayPageParams = { "Envelope", ARRAY_SIZE(Page1), Page1 };
 
