@@ -6,6 +6,7 @@
 #include <new>
 #include <cmath>
 #include <cstring>
+
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 
@@ -26,7 +27,6 @@ struct Mode {
     float decay;
     
 };
-
 struct Voice {
     bool active;
     float age;
@@ -38,6 +38,21 @@ struct HandpanLite : _NT_algorithm {
     float lastTrig1 = 0.0f;
     float lastTrig2 = 0.0f;
 };
+enum
+{
+	kParamAudioInputTrigger1,
+    kParamAudioInputTrigger2,
+    kParamAudioInputCV1,
+    kParamAudioInputCV2,
+    kParamAudioOutputL,
+    kParamAudioOutputR,
+    kParamDecay,
+   
+
+
+};
+
+
 
 static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("Trigger 1",1,1)
@@ -48,6 +63,25 @@ static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output R",1,14)
     { .name = "Decay", .min = 100, .max = 5000, .def = 1000, .unit = kNT_unitMs, .scaling = kNT_scalingNone, .enumStrings = NULL },
 };
+
+
+static const uint8_t Page1[] = { kParamDecay};
+static const uint8_t Page2[] = { kParamAudioInputTrigger1, kParamAudioInputTrigger2, kParamAudioInputCV1, kParamAudioInputCV2, kParamAudioOutputL, kParamAudioOutputR };
+static const _NT_parameterPage ioPageParams = { "Inputs/Outputs", ARRAY_SIZE(Page2), Page2 };
+static const _NT_parameterPage decayPageParams = { "Envelope", ARRAY_SIZE(Page1), Page1 };
+
+
+static const _NT_parameterPage pages[] = {
+    ioPageParams,
+    decayPageParams
+};
+
+static const _NT_parameterPages parameterPages = {
+    .numPages = ARRAY_SIZE(pages),
+    .pages = pages
+};
+
+
 inline float* _NT_getAudioInput(_NT_algorithm* self, int index, float* busFrames, int numFrames) {
     int bus = self->v[index];
     return busFrames + bus * numFrames;
@@ -58,14 +92,7 @@ inline float* _NT_getAudioOutput(_NT_algorithm* self, int index, float* busFrame
     return busFrames + bus * numFrames;
 }
 
-static const uint8_t ioPageParams[] = { 0, 1, 2, 3, 4, 5 };
-static const uint8_t decayPageParams[] = { 6 };
 
-static const _NT_parameterPage pages[] = {
-    { "Inputs/Outputs", ARRAY_SIZE(ioPageParams), ioPageParams },
-    { "Envelope", ARRAY_SIZE(decayPageParams), decayPageParams }
-};
-static const _NT_parameterPages parameterPages = { ARRAY_SIZE(pages), pages };
 
 static float cvToFreq(float cv) {
     // 1V/octave, 1 semitone = 83.333mV
@@ -77,6 +104,7 @@ static float cvToFreq(float cv) {
     HandpanLite* self = new(ptrs.sram) HandpanLite;
     self->parameters = parameters;
     self->parameterPages = &parameterPages;
+
     return self;
 }
 
