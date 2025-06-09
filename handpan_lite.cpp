@@ -73,15 +73,14 @@ static float cvToFreq(float cv) {
     float semitones = volts * 12.0f;
     return 440.0f * powf(2.0f, (semitones - 57.0f) / 12.0f); // MIDI 57 = A3 = 440 Hz
 }
-
-extern "C" _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs, const _NT_algorithmRequirements& req, const int32_t* specifications) {
+ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs, const _NT_algorithmRequirements& req, const int32_t* specifications) {
     HandpanLite* self = new(ptrs.sram) HandpanLite;
     self->parameters = parameters;
     self->parameterPages = &parameterPages;
     return self;
 }
 
-extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
+void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     HandpanLite* self = static_cast<HandpanLite*>(base);
     int numFrames = numFramesBy4 * 4;
 
