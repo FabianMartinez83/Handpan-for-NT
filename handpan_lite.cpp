@@ -6,6 +6,7 @@
 #include <new>
 #include <cmath>
 #include <cstring>
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 
 // Fix for M_PI not being defined on some toolchains
@@ -36,14 +37,23 @@ struct HandpanLite : _NT_algorithm {
 };
 
 static const _NT_parameter parameters[] = {
-    NT_PARAMETER_AUDIO_INPUT("Trigger 1"),
-    NT_PARAMETER_AUDIO_INPUT("Trigger 2"),
-    NT_PARAMETER_AUDIO_INPUT("CV 1"),
-    NT_PARAMETER_AUDIO_INPUT("CV 2"),
-    NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output L"),
-    NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output R"),
+    NT_PARAMETER_AUDIO_INPUT("Trigger 1",1,1)
+    NT_PARAMETER_AUDIO_INPUT("Trigger 2",1,2)
+    NT_PARAMETER_AUDIO_INPUT("CV 1",1,3)
+    NT_PARAMETER_AUDIO_INPUT("CV 2",1,4)
+    NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output L",1,13)
+    NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output R",1,14)
     { "Decay", 100, 5000, 1000, kNT_unitMs, kNT_scalingNone, nullptr }
 };
+inline float* _NT_getAudioInput(_NT_algorithm* self, int index, float* busFrames, int numFrames) {
+    int bus = self->v[index];
+    return busFrames + bus * numFrames;
+}
+
+inline float* _NT_getAudioOutput(_NT_algorithm* self, int index, float* busFrames, int numFrames) {
+    int bus = self->v[index];
+    return busFrames + bus * numFrames;
+}
 
 static const uint8_t pageParams[] = { 0, 1, 2, 3, 4, 5, 6 };
 static const _NT_parameterPage pages[] = {
@@ -149,12 +159,14 @@ static const _NT_factory factory = {
     .initialise = NULL,
     .calculateRequirements = calculateRequirements,
     .construct = construct,
-    .parameterChanged = NULL,
+    .parameterChanged = parameterChanged,
     .step = step,
     .draw = NULL,
     .midiRealtime = NULL,
     .midiMessage = NULL,
-    .tags = 0
+    .tags = 0,
+    .customUi = nullptr,
+    .setupUi = nullptr
 };
 
 extern "C" {
