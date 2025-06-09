@@ -58,9 +58,11 @@ inline float* _NT_getAudioOutput(_NT_algorithm* self, int index, float* busFrame
     return busFrames + bus * numFrames;
 }
 
-static const uint8_t pageParams[] = { 0, 1, 2, 3, 4, 5, 6 };
+static const uint8_t decayPageParams[] = { 6 };
+
 static const _NT_parameterPage pages[] = {
-    { "IO & Decay", ARRAY_SIZE(pageParams), pageParams }
+    { "Inputs/Outputs", 6, (const uint8_t[]){ 0, 1, 2, 3, 4, 5 } },
+    { "Envelope", 1, decayPageParams }
 };
 static const _NT_parameterPages parameterPages = { ARRAY_SIZE(pages), pages };
 
