@@ -106,7 +106,18 @@ static float cvToFreq(float cv) {
     HandpanLite* self = new(ptrs.sram) HandpanLite;
     self->parameters = parameters;
     self->parameterPages = &parameterPages;
-
+    self->lastTrig1 = 0.0f;
+    self->lastTrig2 = 0.0f;
+    for (int i = 0; i < NUM_VOICES; ++i) {
+    self->voices[i].active = false;
+    self->voices[i].age = 0.0f;
+    for (int m = 0; m < MODES_PER_NOTE; ++m) {
+        self->voices[i].modes[m].amplitude = 0.0f;
+        self->voices[i].modes[m].phase = 0.0f;
+        self->voices[i].modes[m].freq = 0.0f;
+        self->voices[i].modes[m].decay = 1.0f;
+    }
+}
     return self;
 }
 
