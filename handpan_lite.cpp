@@ -24,6 +24,7 @@ struct Mode {
     float phase;
     float amplitude;
     float decay;
+    
 };
 
 struct Voice {
@@ -34,6 +35,8 @@ struct Voice {
 
 struct HandpanLite : _NT_algorithm {
     Voice voices[NUM_VOICES];
+    float lastTrig1 = 0.0f;
+    float lastTrig2 = 0.0f;
 };
 
 static const _NT_parameter parameters[] = {
@@ -89,9 +92,13 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     memset(outR, 0, numFrames * sizeof(float));
 
     const float decay = self->v[6] / 1000.0f;
-
     for (int f = 0; f < numFrames; ++f) {
-        if (trig1[f] > 0.5f || trig2[f] > 0.5f) {
+        bool trig1Edge = (self->lastTrig1 <= 0.5f && trig1[f] > 0.5f);
+        bool trig2Edge = (self->lastTrig2 <= 0.5f && trig2[f] > 0.5f);
+        self->lastTrig1 = trig1[f];
+        self->lastTrig2 = trig2[f];
+
+        if (trig1Edge || trig2Edge) {
             for (int v = 0; v < NUM_VOICES; ++v) {
                 if (!self->voices[v].active) {
                     float cv = (trig1[f] > 0.5f) ? cv1[f] : cv2[f];
