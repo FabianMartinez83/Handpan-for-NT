@@ -2,4 +2,4 @@
 
 Attempt to create a "realistic" Handpan algorithm for the Disting NT<br>
 
-# ATTENTION THE PLUGIN ISN'T WORKING PROPERLY
+# ATTENTION THE PLUGIN WORKS NOT EXACTLY THE WAY I WANT IT TO DO
