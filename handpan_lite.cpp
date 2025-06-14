@@ -1,157 +1,136 @@
-// HandpanLite.cpp - Disting NT Plugin (v0.2)
-// Emulates a handpan with 4 voices and 3 modes per note.
+// Disting NT Plugin - Handpan Modal Synthesizer 
+//Made by Fabian Martinez
 
 #include <distingnt/api.h>
-#include <math.h>
-#include <new>
 #include <cmath>
 #include <cstring>
-
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-
+#include <new>
 
 // Fix for M_PI not being defined on some toolchains
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f    // Pi constant
 #endif
 
+
 #define NUM_VOICES 4
-#define MODES_PER_NOTE 3
+#define MODES_PER_VOICE 8
 #define SAMPLE_RATE NT_globals.sampleRate
 
-
-struct Mode {
+struct Resonator {
     float freq;
-    float phase;
-    float amplitude;
-    float decay;
-    
+    float gain;
+    float bandwidth;
+    float y1, y2; // history
+
+    void init(float f, float g, float bw) {
+        freq = f;
+        gain = g;
+        bandwidth = bw;
+        y1 = y2 = 0.0f;
+    }
+
+    float process(float x) {
+        float r = expf(-M_PI * bandwidth / SAMPLE_RATE);
+        float a1 = -2.0f * r * cosf(2.0f * M_PI * freq / SAMPLE_RATE);
+        float a2 = r * r;
+        float y = gain * x - a1 * y1 - a2 * y2;
+        y2 = y1;
+        y1 = y;
+        return y;
+    }
 };
+
 struct Voice {
-    bool active;
-    float age;
-    Mode modes[MODES_PER_NOTE];
+    bool active = false;
+    float age = 0.0f;
+    Resonator modes[MODES_PER_VOICE];
 };
 
-struct HandpanLite : _NT_algorithm {
+struct HandpanModal : _NT_algorithm {
     Voice voices[NUM_VOICES];
-    float lastTrig1 = 0.0f;
-    float lastTrig2 = 0.0f;
+    float lastTrigger = 0.0f;
 };
-enum
-{
-	kParamAudioInputTrigger1,
-    kParamAudioInputTrigger2,
-    kParamAudioInputCV1,
-    kParamAudioInputCV2,
-    kParamAudioOutputL,
-    kParamOutputmodeL,
-    kParamAudioOutputR,
-    kParamOutputmodeR,
+
+enum {
+    kParamTrigger = 0,
+    kParamNoteCV,
     kParamDecay,
-   
-
-
+    kParamOutputL,
+    kParamOutputModeL,
+    kParamOutputR,
+    kParamOutputModeR
 };
 
 
 
 static const _NT_parameter parameters[] = {
-    NT_PARAMETER_AUDIO_INPUT("Trigger 1",1,1)
-    NT_PARAMETER_AUDIO_INPUT("Trigger 2",1,2)
-    NT_PARAMETER_AUDIO_INPUT("CV 1",1,3)
-    NT_PARAMETER_AUDIO_INPUT("CV 2",1,4)
-    NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output L",1,13)
-    NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Output R",1,14)
-    { .name = "Decay", .min = 100, .max = 5000, .def = 1000, .unit = kNT_unitMs, .scaling = kNT_scalingNone, .enumStrings = NULL },
+    NT_PARAMETER_AUDIO_INPUT("Trigger", 1, 1)
+    NT_PARAMETER_AUDIO_INPUT("Note CV", 1, 2) 
+    { "Decay", 100, 5000, 1500, kNT_unitMs, kNT_scalingNone, nullptr },
+    NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Out L", 1, 13)
+    NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Out R", 1, 14)
+  
+
 };
 
+static const uint8_t mainPageParams[] = { kParamTrigger, kParamDecay, kParamOutputL, kParamOutputModeL, kParamOutputR, kParamOutputModeR };
+static const _NT_parameterPage mainPage = { "Modal Handpan", ARRAY_SIZE(mainPageParams), mainPageParams };
+static const _NT_parameterPages parameterPages = { 1, &mainPage };
 
-static const uint8_t Page1[] = { kParamDecay};
-static const uint8_t Page2[] = { kParamAudioInputTrigger1, kParamAudioInputTrigger2, kParamAudioInputCV1, kParamAudioInputCV2, kParamAudioOutputL, kParamOutputmodeL, kParamAudioOutputR, kParamOutputmodeR };
-static const _NT_parameterPage ioPageParams = { "Inputs/Outputs", ARRAY_SIZE(Page2), Page2 };
-static const _NT_parameterPage decayPageParams = { "Envelope", ARRAY_SIZE(Page1), Page1 };
-
-
-static const _NT_parameterPage pages[] = {
-    ioPageParams,
-    decayPageParams
+const float noteTable[] = {
+    146.8f, // D3
+    174.6f, // F3
+    196.0f, // G3
+    220.0f, // A3
+    261.6f, // C4
+    293.7f, // D4
+    329.6f, // E4
+    349.2f, // F4
 };
-
-static const _NT_parameterPages parameterPages = {
-    .numPages = ARRAY_SIZE(pages),
-    .pages = pages
-};
+const int numNotes = sizeof(noteTable) / sizeof(noteTable[0]);
 
 
-inline float* _NT_getAudioInput(_NT_algorithm* self, int index, float* busFrames, int numFrames) {
-    int bus = self->v[index] - 1;  // Adjust for 0-based indexing
-    return busFrames + bus * numFrames;
-}
-
-inline float* _NT_getAudioOutput(_NT_algorithm* self, int index, float* busFrames, int numFrames) {
-    int bus = self->v[index] - 1;   // Adjust for 0-based indexing
-    return busFrames + bus * numFrames;
-}
-
-
-
-static float cvToFreq(float cv) {
-    // 1V/octave, 1 semitone = 83.333mV
-    float volts = cv; // CV-Wert in Volt (angenommen 0–10V Bereich)
-    float semitones = volts * 12.0f;
-    return 440.0f * powf(2.0f, (semitones - 57.0f) / 12.0f); // MIDI 57 = A3 = 440 Hz
-}
- _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs, const _NT_algorithmRequirements& req, const int32_t* specifications) {
-    HandpanLite* self = new(ptrs.sram) HandpanLite;
+_NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs, const _NT_algorithmRequirements& req, const int32_t*) {
+    HandpanModal* self = new(ptrs.sram) HandpanModal;
     self->parameters = parameters;
     self->parameterPages = &parameterPages;
-    self->lastTrig1 = 0.0f;
-    self->lastTrig2 = 0.0f;
-    for (int i = 0; i < NUM_VOICES; ++i) {
-    self->voices[i].active = false;
-    self->voices[i].age = 0.0f;
-    for (int m = 0; m < MODES_PER_NOTE; ++m) {
-        self->voices[i].modes[m].amplitude = 0.0f;
-        self->voices[i].modes[m].phase = 0.0f;
-        self->voices[i].modes[m].freq = 0.0f;
-        self->voices[i].modes[m].decay = 1.0f;
-    }
-}
     return self;
-}
+};
 
-void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
-    HandpanLite* self = static_cast<HandpanLite*>(base);
+static float triggerThreshold = 0.5f;
+
+extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
+    HandpanModal* self = static_cast<HandpanModal*>(base);
     int numFrames = numFramesBy4 * 4;
 
-    float* trig1 = _NT_getAudioInput(self, 0, busFrames, numFrames);
-    float* trig2 = _NT_getAudioInput(self, 1, busFrames, numFrames);
-    float* cv1 = _NT_getAudioInput(self, 2, busFrames, numFrames);
-    float* cv2 = _NT_getAudioInput(self, 3, busFrames, numFrames);
-    float* outL = _NT_getAudioOutput(self, 4, busFrames, numFrames);
-    float* outR = _NT_getAudioOutput(self, 5, busFrames, numFrames);
+    float* noteCV = busFrames + (self->v[kParamNoteCV] - 1) * numFrames;
+    float* inTrig = busFrames + (self->v[kParamTrigger] - 1) * numFrames;
+    float* outL = busFrames + (self->v[kParamOutputL] - 1) * numFrames;
+    float* outR = busFrames + (self->v[kParamOutputR] - 1) * numFrames;
     memset(outL, 0, numFrames * sizeof(float));
     memset(outR, 0, numFrames * sizeof(float));
 
-    const float decay = self->v[6] / 1000.0f;
-    for (int f = 0; f < numFrames; ++f) {
-        bool trig1Edge = (self->lastTrig1 <= 0.5f && trig1[f] > 0.5f);
-        bool trig2Edge = (self->lastTrig2 <= 0.5f && trig2[f] > 0.5f);
-        self->lastTrig1 = trig1[f];
-        self->lastTrig2 = trig2[f];
+    float decaySec = fmaxf(self->v[kParamDecay], 100) / 1000.0f;
 
-        if (trig1Edge || trig2Edge) {
+    for (int f = 0; f < numFrames; ++f) {
+        bool trigEdge = (self->lastTrigger <= triggerThreshold && inTrig[f] > triggerThreshold);
+        self->lastTrigger = inTrig[f];
+
+        if (trigEdge) {
+            float volts = noteCV[f];
+            int index = static_cast<int>(floorf(volts));
+            index = index < 0 ? 0 : (index >= numNotes ? numNotes - 1 : index);
+            float baseFreq = noteTable[index];
+
             for (int v = 0; v < NUM_VOICES; ++v) {
                 if (!self->voices[v].active) {
-                    float cv = (trig1[f] > 0.5f) ? cv1[f] : cv2[f];
-                    float freqBase = cvToFreq(cv);
+                    for (int m = 0; m < MODES_PER_VOICE; ++m) {
+                        float ratio = (float)(m + 1);
+                        float freq = baseFreq * ratio;
+                        float gain = 1.0f / ratio;
+                        float bw = 1.0f / decaySec;
 
-                    for (int m = 0; m < MODES_PER_NOTE; ++m) {
-                        self->voices[v].modes[m].freq = freqBase * (m + 1);
-                        self->voices[v].modes[m].phase = 0.0f;
-                        self->voices[v].modes[m].amplitude = 1.0f;
-                        self->voices[v].modes[m].decay = decay;
+                        self->voices[v].modes[m].init(freq, gain, bw);
                     }
                     self->voices[v].active = true;
                     self->voices[v].age = 0.0f;
@@ -159,37 +138,34 @@ void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
                 }
             }
         }
-    }
 
-    for (int f = 0; f < numFrames; ++f) {
         float sample = 0.0f;
         for (int v = 0; v < NUM_VOICES; ++v) {
             if (!self->voices[v].active) continue;
-
+            float impulse = (self->voices[v].age < 1.0f / SAMPLE_RATE) ? 1.0f : 0.0f;
             float voiceSample = 0.0f;
             bool allDead = true;
-            for (int m = 0; m < MODES_PER_NOTE; ++m) {
-                Mode& mode = self->voices[v].modes[m];
-                float env = expf(-self->voices[v].age / mode.decay);
-                float s = env * sinf(2.0f * M_PI * mode.freq * self->voices[v].age);
-                voiceSample += s * 0.3f;
-                if (env > 0.001f) allDead = false;
+
+            for (int m = 0; m < MODES_PER_VOICE; ++m) {
+                float s = self->voices[v].modes[m].process(impulse);
+                voiceSample += s;
+                if (fabsf(s) > 0.0005f) allDead = false;
             }
 
             if (allDead) self->voices[v].active = false;
             sample += voiceSample;
             self->voices[v].age += 1.0f / SAMPLE_RATE;
         }
-        outL[f] = sample;
-        outR[f] = sample;
+
+        outL[f] = sample * 0.02f;
+        outR[f] = sample * 0.02f;
     }
 }
 
-extern "C" void parameterChanged(_NT_algorithm* self, int p) {}
-
-extern "C" void calculateRequirements(_NT_algorithmRequirements& req, const int32_t* specifications) {
+extern "C" void parameterChanged(_NT_algorithm*, int) {}
+extern "C" void calculateRequirements(_NT_algorithmRequirements& req, const int32_t*) {
     req.numParameters = ARRAY_SIZE(parameters);
-    req.sram = sizeof(HandpanLite);
+    req.sram = sizeof(HandpanModal);
     req.dram = 0;
     req.dtc = 0;
     req.itc = 0;
@@ -197,12 +173,10 @@ extern "C" void calculateRequirements(_NT_algorithmRequirements& req, const int3
 
 
 
-
-
 static const _NT_factory factory = {
-    .guid = NT_MULTICHAR('H','D','P','N'),
-    .name = "HandpanLite",
-    .description = "CV Triggered Modal Handpan",
+    .guid = NT_MULTICHAR('H','M','O','D'),
+    .name = "HandpanModal",
+    .description = "Modal Handpan Synthesizer",
     .numSpecifications = 0,
     .specifications = NULL,
     .calculateStaticRequirements = NULL,
@@ -214,9 +188,7 @@ static const _NT_factory factory = {
     .draw = NULL,
     .midiRealtime = NULL,
     .midiMessage = NULL,
-    .tags = 0,
-    .customUi = nullptr,
-    .setupUi = nullptr
+    .tags = 0
 };
 
 extern "C" {
