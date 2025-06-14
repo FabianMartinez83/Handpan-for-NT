@@ -121,8 +121,8 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
 
     float* noteCV = busFrames + (self->v[kParamNoteCV] - 1) * numFrames;
     float* inTrig = busFrames + (self->v[kParamTrigger] - 1) * numFrames;
-    float* outL = busFrames + (self->v[kParamOutputL] - 1) * numFrames;
-    float* outR = busFrames + (self->v[kParamOutputR] - 1) * numFrames;
+    float* outL   = busFrames + (self->v[kParamOutputL]   - 1) * numFrames;
+    float* outR   = busFrames + (self->v[kParamOutputR]   - 1) * numFrames;
     memset(outL, 0, numFrames * sizeof(float));
     memset(outR, 0, numFrames * sizeof(float));
 
@@ -132,35 +132,30 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
         bool trigEdge = (self->lastTrigger <= triggerThreshold && inTrig[f] > triggerThreshold);
         self->lastTrigger = inTrig[f];
 
+        // Note‑On: neue Stimme initialisieren
         if (trigEdge) {
-    float volts = noteCV[f];
-    int index = static_cast<int>(floorf(volts));
-    index = index < 0 ? 0 : (index >= numNotes ? numNotes - 1 : index);
-    float baseFreq = noteTable[index];
+            float volts = noteCV[f];
+            int index = static_cast<int>(floorf(volts));
+            // Manueller Clamp (weil std::clamp nicht verfügbar)
+            index = (index < 0) ? 0 : (index > numNotes - 1 ? numNotes - 1 : index);
+            float baseFreq = noteTable[index];
 
-   if (trigEdge) {
-    float volts = noteCV[f];
-    int index = static_cast<int>(floorf(volts));
-    index = std::clamp(index, 0, numNotes-1);
-    float baseFreq = noteTable[index];
-
-    for (int v = 0; v < NUM_VOICES; ++v) {
-        if (!self->voices[v].active) {
-            for (int m = 0; m < MODES_PER_VOICE; ++m) {
-                // 1) inharmonisch: Basis × Teilton × (1 + Detune)
-                float freq = baseFreq * modeRatios[m] * (1.0f + modeDetune[m]);
-                // 2) Oberton‑Amplitude
-                float gain = modeGains[m];
-                // 3) Bandbreite: tiefe länger, hohe schneller
-                float bw = (1.0f / decaySec) * (0.5f + 0.5f * (m / float(MODES_PER_VOICE-1)));
-                self->voices[v].modes[m].init(freq, gain, bw);
+            // Finde freie Voice und initialisiere ihre Modi
+            for (int v = 0; v < NUM_VOICES; ++v) {
+                if (!self->voices[v].active) {
+                    for (int m = 0; m < MODES_PER_VOICE; ++m) {
+                        float freq = baseFreq * modeRatios[m] * (1.0f + modeDetune[m]);
+                        float gain = modeGains[m];
+                        float bw = (1.0f / decaySec) * (0.5f + 0.5f * (m / float(MODES_PER_VOICE - 1)));
+                        self->voices[v].modes[m].init(freq, gain, bw);
+                    }
+                    self->voices[v].active = true;
+                    self->voices[v].age = 0.0f;
+                    break;
+                }
             }
-            self->voices[v].active = true;
-            self->voices[v].age = 0.0f;
-            break;
         }
-    }
-}
+
 
 
 
