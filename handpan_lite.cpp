@@ -174,9 +174,9 @@ extern "C" void calculateRequirements(_NT_algorithmRequirements& req, const int3
 
 
 static const _NT_factory factory = {
-    .guid = NT_MULTICHAR('H','M','O','D'),
-    .name = "HandpanModal",
-    .description = "Modal Handpan Synthesizer",
+    .guid = NT_MULTICHAR('H','A','N','D'),
+    .name = "Handpan",
+    .description = "Handpan Synthesizer",
     .numSpecifications = 0,
     .specifications = NULL,
     .calculateStaticRequirements = NULL,
