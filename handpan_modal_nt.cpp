@@ -49,6 +49,7 @@ struct Voice {
 struct HandpanModal : _NT_algorithm {
     Voice voices[NUM_VOICES];
     float lastTrigger = 0.0f;
+    float lpState = 0.0f; // Low-pass filter state
 };
 
 enum {
@@ -88,13 +89,21 @@ const float noteTable[] = {
     349.2f, // F4
 };
 const int numNotes = sizeof(noteTable) / sizeof(noteTable[0]);
-// ---- Handpan‑typische Teilton‑Verhältnisse und -Amplituden ----
+// ——— realistischere Teilton‑Verhältnisse (aus Handpan‑Analysen) ———
 static const float modeRatios[MODES_PER_VOICE] = {
-    1.000f, 1.950f, 2.930f, 3.960f, 5.120f, 6.350f, 7.620f, 8.880f
+    1.000f, 1.950f, 2.760f, 3.760f, 4.830f, 5.850f, 6.930f, 7.960f
 };
+// ——— typisches Oberton‑Level pro Modus ———
 static const float modeGains[MODES_PER_VOICE] = {
-    1.00f, 0.70f, 0.50f, 0.30f, 0.20f, 0.15f, 0.10f, 0.05f
+    1.00f, 0.80f, 0.60f, 0.40f, 0.30f, 0.20f, 0.15f, 0.10f
 };
+// ——— leichte Inharmonizität (±0.2 %) für mehr Natürlichkeit ———
+static const float modeDetune[MODES_PER_VOICE] = {
+    0.000f, -0.002f, +0.0015f, -0.001f, +0.002f, -0.0015f, +0.001f, -0.0005f
+};
+
+// ——— einfacher Low‑Pass für Wärme (fc ≈ 3 kHz) ———
+static const float lpAlpha = expf(-2.0f * M_PI * 3000.0f / SAMPLE_RATE);
 
 
 _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs, const _NT_algorithmRequirements& req, const int32_t*) {
@@ -129,15 +138,20 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     index = index < 0 ? 0 : (index >= numNotes ? numNotes - 1 : index);
     float baseFreq = noteTable[index];
 
-    // ---- Neuer Init‑Block mit modeRatios und modeGains ----
+   if (trigEdge) {
+    float volts = noteCV[f];
+    int index = static_cast<int>(floorf(volts));
+    index = std::clamp(index, 0, numNotes-1);
+    float baseFreq = noteTable[index];
+
     for (int v = 0; v < NUM_VOICES; ++v) {
         if (!self->voices[v].active) {
             for (int m = 0; m < MODES_PER_VOICE; ++m) {
-                // 1) Frequenz: Basis × typischer Teilton‑Ratio
-                float freq = baseFreq * modeRatios[m];
-                // 2) Amplitude: typischer Oberton‑Level
+                // 1) inharmonisch: Basis × Teilton × (1 + Detune)
+                float freq = baseFreq * modeRatios[m] * (1.0f + modeDetune[m]);
+                // 2) Oberton‑Amplitude
                 float gain = modeGains[m];
-                // 3) Bandbreite: unterschiedliche Decays pro Modus
+                // 3) Bandbreite: tiefe länger, hohe schneller
                 float bw = (1.0f / decaySec) * (0.5f + 0.5f * (m / float(MODES_PER_VOICE-1)));
                 self->voices[v].modes[m].init(freq, gain, bw);
             }
@@ -147,6 +161,7 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
         }
     }
 }
+
 
 
         float sample = 0.0f;
@@ -166,6 +181,9 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
             sample += voiceSample;
             self->voices[v].age += 1.0f / SAMPLE_RATE;
         }
+        // — einfache 1‑Pole LPF für mehr Wärme —
+        sample = self->lpState + lpAlpha * (sample - self->lpState);
+        self->lpState = sample;
 
         outL[f] = sample * 0.02f;
         outR[f] = sample * 0.02f;
