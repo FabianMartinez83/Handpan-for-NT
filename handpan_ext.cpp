@@ -50,9 +50,13 @@ struct ModalResonator {
     freq = f;
     gain = g;
     bandwidth = bw;
+    bw = fmaxf(bw, 5.0f);  // Mindestbandbreite 5 Hz
+
     env = 1.0f;
     age = 0.0f;
-    y1 = y2 = 0.0f;
+    y1 = 0.0001f * gain;
+    y2 = 0.0001f * gain;
+
 
 
     r = expf(-M_PI * bandwidth / SAMPLE_RATE);
@@ -342,7 +346,10 @@ inline float getCVOrParam(float* cv, int f, float paramValue, float scale = 1.0f
 extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     ModalInstrument* self = static_cast<ModalInstrument*>(base);
     int numFrames = numFramesBy4 * 4;
-
+    int noiseA = self->v[kParamNoiseAttack];
+    int noiseD = self->v[kParamNoiseDecay];
+    float noiseS = self->v[kParamNoiseSustain] / 100.0f;
+    int noiseR = self->v[kParamNoiseRelease];
     // Get input buffers
     float* trig = busFrames + (self->v[kParamTrigger] - 1) * numFrames;
     float* noteCV = busFrames + (self->v[kParamNoteCV] - 1) * numFrames;
@@ -400,16 +407,15 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
             }
 
             Voice& voice = self->voices[voiceToUse];
-            voice.excitation.generate(excType, instrType, inharmOn ? inharmAmt : 0.0f, noiseLevel);
+            voice.excitation.generate(excType,instrType,inharmOn ? inharmAmt : 0.0f,noiseLevel,noiseA,noiseD,noiseS,noiseR);
             
 
             float dampingFactor = 1.0f;
             if (instrType == 3 || instrType == 4) dampingFactor = 0.7f; // Gong/Triangle damping
             else if (instrType == 8) decay *= 2.5f; // Timpani decay adjustment
             else if (instrType == 13) decay *= 2.0f; // Frame Drum decay adjustment
-            
 
-             // Get configuration for the selected instrument
+            // Get configuration for the selected instrument
             float* ratios = config.ratios;
             float* gains = config.gains;
             for (int m = 0; m < config.count; ++m) {
@@ -418,7 +424,7 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
                     static const float inharmonicOffset[MAX_MODES] = {-0.004f, +0.006f, -0.002f, +0.007f, -0.005f, +0.003f, -0.001f, +0.002f,+0.001f, -0.001f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
                     freq *= (1.0f + inharmAmt * inharmonicOffset[m]);
                     }
-                freq = fminf(freq, SAMPLE_RATE * 0.45f);
+                freq = fminf(freq, SAMPLE_RATE * 0.35f);
                 float gain = gains[m];
                 float bw = (1.0f / decay) * (0.4f + 0.6f * m / config.count) * dampingFactor;
                 voice.modes[m].init(freq, gain, bw);
@@ -458,8 +464,8 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
         self->lpState = sample;
    
         // Write to output
-        outL[f] = sample * 0.01f;
-        outR[f] = sample * 0.01f;
+        outL[f] = sample * 0.1f;
+        outR[f] = sample * 0.1f;
     }
 
     self->lastTrigger = gateState;
