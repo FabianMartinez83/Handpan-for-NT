@@ -148,14 +148,15 @@ struct Excitation {
         // leichte inharmonizität über sample jitter (optional)
         if (inharmonicity > 0.0f) {
             for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i)
-                buffer[i] *= 1.0f + sinf(i * 0.05f) * 0.005f * inharmonicity;
+                buffer[i] *= 1.0f + 0.002f * inharmonicity * sinf(i * 0.1f);
+
         }
 
         // mind. 3 werte setzen zur sicherheit
         if (buffer[0] == 0.0f && buffer[1] == 0.0f && buffer[2] == 0.0f) {
-            buffer[0] = 0.6f;
+            buffer[0] = 0.2f;
             buffer[1] = 0.4f;
-            buffer[2] = 0.2f;
+            buffer[2] = 0.6f;
         }
     }
 
@@ -452,7 +453,7 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
         float alpha = expf(-2.0f * M_PI * 3000.0f / SAMPLE_RATE);
         sample = self->lpState + alpha * (sample - self->lpState);
         self->lpState = sample;
-    
+   
         // Write to output
         outL[f] = sample * 0.01f;
         outR[f] = sample * 0.01f;
