@@ -108,13 +108,64 @@ struct Excitation {
         pos = 0;
         for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i) buffer[i] = 0.0f;
 
-        // Different excitation shapes
+// Different excitation shapes
         switch (type) {
-            case 0: for (int i = 0; i < 8; ++i) buffer[i] = 1.0f - i * 0.1f; break;
-            case 1: buffer[0] = 1.0f; buffer[1] = 0.6f; buffer[2] = 0.2f; break;
-            case 2: for (int i = 0; i < 12; ++i) buffer[i] = 1.0f - (i / 12.0f); break;
-            case 3: for (int i = 0; i < 24; ++i) buffer[i] = 0.7f * sinf(i * M_PI / 24.0f); break;
-            case 4: buffer[0] = 1.0f; buffer[1] = 0.4f; buffer[2] = 0.0f; break;
+// Hard finger: loud, longer impulse
+             case 0: for (int i = 0; i < 32; ++i) buffer[i] = 0.7f * expf(-0.09f * i);
+                break;
+// Soft finger: short, sharp impulse
+            case 1: buffer[0] = 1.0f; buffer[1] = 0.5f;
+                break;
+ // Hand: wider, round smashy impulse               
+            case 2: for (int i = 0; i < 48; ++i) buffer[i] = 0.6f * expf(-0.06f * i);
+                break;
+// Hard mallet: Loud, slowly rising                
+            case 3: for (int i = 0; i < 64; ++i) buffer[i] = 0.5f * (1.0f * expf(-0.04f * i));
+                break;
+// Soft mallet: very short, smooth
+            case 4: buffer[0] = 1.0f; buffer[1] = -0.5f; buffer[2] = 0.2f;
+                break;
+// Handpan-like: longer, smoother impulse
+            case 5: for (int i = 0; i < 8; ++i) buffer[i] = 1.0f - i * 0.1f;
+                break;
+// Steel drum-like: sharp, clear attack
+            case 6: buffer[0] = 1.0f; buffer[1] = 0.6f; buffer[2] = 0.2f;
+               break;
+// Bell-like: longer, smoother decay
+            case 7: for (int i = 0; i < 12; ++i) buffer[i] = 1.0f - (i / 2.0f);
+               break;
+// Chime-like: bright, ringing
+            case 8: for (int i = 0; i < 4; ++i) buffer[i] = 0.5f - i *0.2f;
+                break;
+// Custom: user-defined shape
+            case 9: buffer[0] = 1.0f; buffer[1] = 0.4f; buffer[2] = 0.0f;
+                break;
+// Muted slap
+            case 10:  buffer[0] = 0.7f; buffer[1] = -0.3f;
+                break;
+// Brush
+            case 11:  for (int i = 0; i < 4; ++i) buffer[i] = 0.03f * i - 0.4f;
+                break;
+ // Double tap
+            case 12: buffer[0] = 1.0f; buffer[8] = 0.7f;
+                break;  
+// Reverse                
+            case 13: for (int i = 0; i < 16; ++i) buffer[i] =0.02f * i - 0.6f;
+                break;  
+ // Noise burst, randomized
+            case 14: for (int i = 0; i < 24; ++i) buffer[i] = (((rand() % 2000) / 1000.0f) - 1.0f) * expf(-0.2f * i);
+                break;   
+// Triangle pulse
+            case 15:   buffer[0] = 0.8f; buffer[1] = 0.4f;
+                break;  
+// Sine burst
+            case 16:   buffer[0] = 0.2f; buffer[1] = 0.6f;
+                break;    
+// Fallback: single impulse
+            default:  buffer[0] = 1.0f; break;
+        
+
+            
         }
 
         // Add a little "strike" for some instruments
@@ -196,12 +247,63 @@ enum {
 };
 
 static const char* instrumentTypes[] = {
-    "Handpan", "Steel Drum", "Bell", "Gong", "Triangle", "Tabla", "Conga", "Tom", "Timpani",
-    "Udu", "Slit Drum", "Hi-Hat", "Cowbell", "Frame Drum"
+    "Handpan",         // 0
+    "Steel Drum",      // 1
+    "Bell",            // 2
+    "Gong",            // 3
+    "Triangle",        // 4
+    "Tabla",           // 5
+    "Conga",           // 6
+    "Tom",             // 7
+    "Timpani",         // 8
+    "Udu",             // 9
+    "Slit Drum",       // 10
+    "Hi-Hat",          // 11
+    "Cowbell",         // 12
+    "Frame Drum",      // 13
+    "Kalimba",         // 14
+    "Woodblock",       // 15
+    "Glass Bowl",      // 16
+    "Metal Pipe",      // 17
+    "Snare",           // 18
+    "Bottle",          // 19
+    "Deep Gong",       // 20
+    "Ceramic Pot",     // 21
+    "Plate",           // 22
+    "Agogo Bell",      // 23
+    "Water Drop",      // 24
+    "Anvil",           // 25
+    "Marimba",         // 26
+    "Vibraphone",      // 27
+    "Glass Harmonica", // 28
+    "Oil Drum",        // 29
+    "Synth Tom",       // 30
+    "Spring Drum",     // 31
+    "Brake Drum",      // 32
+    "Wind Chime",      // 33
+    "Tibetan Bowl",    // 34
+    "Plastic Tube",    // 35
+    "Gamelan Gong",    // 36
+    "Sheet Metal",     // 37
+    "Toy Piano",       // 38
+    "Metal Rod",       // 39
+    "Waterphone",      // 40
+    "Steel Plate",     // 41
+    "Large Bell",      // 42
+    "Cowbell 2",       // 43
+    "Trash Can",       // 44
+    "Sheet Glass",     // 45
+    "Pipe Organ",      // 46
+    "Alien Metal",     // 47
+    "Broken Cymbal",   // 48
+    "Submarine Hull",  // 49
+    "Random Metal"     // 50
 };
 
 static const char* excitationTypes[] = {
-    "Finger Soft", "Finger Hard", "Hand", "Soft Mallet", "Hard Mallet"
+    "Finger Hard", "Finger Soft", "Hand Smash", "Hard Mallet", "SoftMallet",
+    "Handpan", "Hard Steel", "Ding", "Chime", "Custom",
+    "Muted Slap", "Brush", "Double Tap", "Reverse", "Noise Burst", "Triangle Pulse", "Sine Burst"
 };
 
 static const char* resonatorTypes[] = {
@@ -213,8 +315,8 @@ static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("Note CV", 1, 2)
     { "Decay", 100, 8000, 1500, kNT_unitMs, kNT_scalingNone, nullptr },
     { "Base Freq", 2000, 22000, 4400, kNT_unitHz, kNT_scaling100, nullptr },
-    { "Instrument", 0, 13, 0, kNT_unitEnum, kNT_scalingNone, instrumentTypes },
-    { "Excitation", 0, 4, 0, kNT_unitEnum, kNT_scalingNone, excitationTypes },
+    { "Instrument", 0, 50, 0, kNT_unitEnum, kNT_scalingNone, instrumentTypes },
+    { "Excitation", 0, 16, 0, kNT_unitEnum, kNT_scalingNone, excitationTypes },
     { "Inharm Amt", 0, 100, 20, kNT_unitPercent, kNT_scalingNone, nullptr },
     { "Inharm On", 0, 1, 1, kNT_typeBoolean, kNT_scalingNone, nullptr },
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Out L", 1, 13)
@@ -224,10 +326,10 @@ static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("Excit. CV", 1, 5)
     { "Resonator Type", 0, 5, 0, kNT_unitEnum, kNT_scalingNone, resonatorTypes },
     { "Noise Level", 0, 100, 35, kNT_unitPercent, kNT_scalingNone, nullptr },
-    { "Noise A", 1, 512, 64, kNT_unitFrames, kNT_scalingNone, nullptr },
-    { "Noise D", 1, 1024, 128, kNT_unitFrames, kNT_scalingNone, nullptr },
+    { "Noise A", 1, 2000, 64, kNT_unitMs, kNT_scalingNone, nullptr },
+    { "Noise D", 1, 4000, 128, kNT_unitMs, kNT_scalingNone, nullptr },
     { "Noise S", 0, 100, 30, kNT_unitPercent, kNT_scalingNone, nullptr },
-    { "Noise R", 1, 2048, 256, kNT_unitFrames, kNT_scalingNone, nullptr },
+    { "Noise R", 1, 8000, 256, kNT_unitMs, kNT_scalingNone, nullptr },
 };
 
 static const uint8_t page1[] = { kParamTrigger, kParamNoteCV, kParamDecay, kParamBaseFreq };
@@ -273,6 +375,46 @@ ModalConfig getModalConfig(int type) {
         case 11: config = { {1.0f,1.7f,2.9f,4.4f,6.1f}, {1,0.5,0.4,0.3,0.2}, 5 }; break;
         case 12: config = { {1.0f,2.1f,3.9f,5.7f}, {1,0.4,0.3,0.2}, 4 }; break;
         case 13: config = { {1.0f,1.4f,2.3f,3.2f}, {1,0.6,0.4,0.2}, 4 }; break;
+        case 14: config = { {1.0f, 2.2f, 3.5f, 5.0f}, {1, 0.5, 0.3, 0.15}, 4 }; break;
+        case 15: config = { {1.0f, 2.8f, 4.1f}, {1, 0.4, 0.2}, 3 }; break;
+        case 16: config = { {1.0f, 2.5f, 4.8f, 6.9f}, {1, 0.7, 0.4, 0.2}, 4 }; break;
+        case 17: config = { {1.0f, 1.6f, 2.3f, 3.1f, 4.0f}, {1, 0.8, 0.5, 0.3, 0.15}, 5 }; break;
+        case 18: config = { {1.0f, 1.5f, 2.2f, 3.3f, 4.7f}, {1, 0.6, 0.4, 0.2, 0.1}, 5 }; break;
+        case 19: config = { {1.0f, 2.0f, 3.7f, 5.5f}, {1, 0.5, 0.3, 0.1}, 4 }; break;
+        case 20: config = { {1.0f, 1.8f, 2.7f, 3.9f, 5.6f}, {1, 0.7, 0.5, 0.3, 0.15}, 5 }; break;
+        case 21: config = { {1.0f, 1.7f, 2.9f, 4.2f}, {1, 0.6, 0.3, 0.15}, 4 }; break;
+        case 22: config = { {1.0f, 1.59f, 2.14f, 2.30f, 2.65f, 2.92f}, {1, 0.7, 0.5, 0.3, 0.2, 0.1}, 6 }; break;
+        case 23: config = { {1.0f, 2.3f, 3.7f, 5.1f}, {1, 0.5, 0.3, 0.15}, 4 }; break;
+        case 24: config = { {1.0f, 2.5f, 4.7f}, {1, 0.4, 0.2}, 3 }; break;
+        case 25: config = { {1.0f, 1.4f, 2.2f, 3.6f, 5.0f}, {1, 0.8, 0.5, 0.3, 0.1}, 5 }; break;
+        case 26: config = { {1.0f, 3.9f, 9.0f}, {1, 0.4, 0.2}, 3 }; break;
+        case 27: config = { {1.0f, 2.8f, 5.6f, 8.9f}, {1, 0.5, 0.3, 0.1}, 4 }; break;
+        case 28: config = { {1.0f, 2.0f, 3.0f, 4.0f, 5.0f}, {1, 0.7, 0.5, 0.3, 0.2}, 5 }; break;
+        case 29: config = { {1.0f, 1.8f, 2.7f, 3.5f, 4.2f}, {1, 0.6, 0.4, 0.2, 0.1}, 5 }; break;
+        case 30: config = { {1.0f, 1.5f, 2.2f}, {1, 0.5, 0.2}, 3 }; break;
+        case 31: config = { {1.0f, 1.3f, 1.7f, 2.2f, 2.8f}, {1, 0.7, 0.5, 0.3, 0.15}, 5 }; break;
+        case 32: config = { {1.0f, 2.2f, 3.5f, 5.1f}, {1, 0.6, 0.4, 0.2}, 4 }; break;
+        case 33: config = { {1.0f, 2.5f, 4.1f, 6.2f}, {1, 0.5, 0.3, 0.15}, 4 }; break;
+        case 34: config = { {1.0f, 2.3f, 3.8f, 5.7f}, {1, 0.7, 0.4, 0.2}, 4 }; break;
+        case 35: config = { {1.0f, 1.6f, 2.3f, 3.0f}, {1, 0.6, 0.3, 0.1}, 4 }; break;
+        case 36: config = { {1.0f, 1.8f, 2.6f, 3.7f, 5.2f}, {1, 0.8, 0.5, 0.3, 0.1}, 5 }; break;
+        case 37: config = { {1.0f, 1.41f, 2.24f, 2.83f, 3.16f}, {1, 0.7, 0.5, 0.3, 0.15}, 5 }; break;
+        case 38: config = { {1.0f, 2.9f, 5.5f, 8.2f}, {1, 0.5, 0.3, 0.1}, 4 }; break;
+        case 39: config = { {1.0f, 2.76f, 5.40f, 8.93f}, {1, 0.6, 0.3, 0.1}, 4 }; break;
+        case 40: config = { {1.0f, 1.3f, 2.1f, 3.4f, 5.7f}, {1, 0.7, 0.5, 0.3, 0.15}, 5 }; break;
+        case 41: config = { {1.0f, 1.58f, 2.24f, 2.87f, 3.46f, 4.0f}, {1, 0.7, 0.5, 0.3, 0.2, 0.1}, 6 }; break;
+        case 42: config = { {1.0f, 2.1f, 2.9f, 4.0f, 5.2f, 6.8f}, {1, 0.8, 0.6, 0.4, 0.2, 0.1}, 6 }; break;
+        case 43: config = { {1.0f, 1.7f, 2.5f, 3.3f}, {1, 0.6, 0.4, 0.2}, 4 }; break;
+        case 44: config = { {1.0f, 1.9f, 2.8f, 4.2f, 5.7f}, {1, 0.5, 0.3, 0.15, 0.08}, 5 }; break;
+        case 45: config = { {1.0f, 1.41f, 2.0f, 2.24f, 2.83f}, {1, 0.7, 0.5, 0.3, 0.15}, 5 }; break;
+        case 46: config = { {1.0f, 2.0f, 3.0f, 4.0f, 5.0f}, {1, 0.6, 0.3, 0.15, 0.08}, 5 }; break;
+        case 47: config = { {1.0f, 1.13f, 1.47f, 2.03f, 2.89f, 4.17f}, {1, 0.9, 0.7, 0.5, 0.3, 0.1}, 6 }; break;
+        case 48: config = { {1.0f, 1.3f, 1.7f, 2.2f, 2.9f, 3.7f}, {1, 0.8, 0.5, 0.3, 0.2, 0.1}, 6 }; break;
+        case 49: config = { {1.0f, 1.2f, 1.5f, 2.0f, 2.7f, 3.5f}, {1, 0.7, 0.5, 0.3, 0.2, 0.1}, 6 }; break;
+        case 50: config = { {1.0f, 1.33f, 2.17f, 2.98f, 4.11f, 5.29f}, {1, 0.6, 0.4, 0.2, 0.1, 0.05}, 6 }; break;
+
+
+
         default: config = { {1,2,3,4,5,6,7,8,9,10,11,12}, {1,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.15,0.1,0.08,0.06}, 12 }; break;
     }
     return config;
@@ -325,10 +467,13 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     int numFrames = numFramesBy4 * 4;                            // Total number of frames
 
     // Read noise ADSR parameters from UI
-    int noiseA = self->v[kParamNoiseAttack];
-    int noiseD = self->v[kParamNoiseDecay];
+    int noiseA = (int)(self->v[kParamNoiseAttack] * SAMPLE_RATE / 1000.0f);
+    int noiseD = (int)(self->v[kParamNoiseDecay] * SAMPLE_RATE / 1000.0f);
     float noiseS = self->v[kParamNoiseSustain] / 100.0f;
-    int noiseR = self->v[kParamNoiseRelease];
+    int noiseR = (int)(self->v[kParamNoiseRelease] * SAMPLE_RATE / 1000.0f);
+    
+    
+   
     float noiseLevel = self->v[kParamNoiseLevel] / 100.0f;
 
     // Get input and output buffers
@@ -345,8 +490,8 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     memset(outR, 0, numFrames * sizeof(float));
 
     // Read other parameters
-    float baseHzParam = self->v[kParamBaseFreq] / 100.0f;
-    // float decayParam = fmaxf(self->v[kParamDecay], 100) / 1000.0f; // <- entfernen
+    float baseHzParam = self->v[kParamBaseFreq]; // Base frequency parameter
+  
     bool inharmOn = self->v[kParamInharmEnable] > 0;
     float inharmAmt = self->v[kParamInharmLevel] / 100.0f;
     int instrType = self->v[kParamInstrumentType];
@@ -361,7 +506,7 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
         float noteFactor = powf(2.0f, noteV);
         float cvBase = (cvFreq && fabsf(cvFreq[f]) > 0.001f) ? cvFreq[f] : 0.0f;
         float baseHz = ((cvBase > 0.0f) ? fmaxf(cvBase, 20.0f) : baseHzParam) * noteFactor;
-
+        baseHz = fmaxf(baseHz, 40.0f); // Never under 40 Hz
         // Calculate decay with CV and parameter
         float decayCV = (cvDecay ? cvDecay[f] : 0.0f);
         float decayMs = self->v[kParamDecay] + decayCV * 8000.0f; // CV skaliert auf 0...8s
