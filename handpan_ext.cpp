@@ -111,14 +111,14 @@ struct Excitation {
         pos = 0;
         for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i) buffer[i] = 0.0f;
 
-        /*switch (type) {
+            switch (type) {
             case 0: for (int i = 0; i < 8; ++i) buffer[i] = 1.0f - i * 0.1f; break;
             case 1: buffer[0] = 1.0f; buffer[1] = 0.6f; buffer[2] = 0.2f; break;
             case 2: for (int i = 0; i < 12; ++i) buffer[i] = 1.0f - (i / 12.0f); break;
             case 3: for (int i = 0; i < 24; ++i) buffer[i] = 0.7f * sinf(i * M_PI / 24.0f); break;
             case 4: buffer[0] = 1.0f; buffer[1] = 0.4f; buffer[2] = 0.0f; break;
         }
-*/
+
         // instrument-typischer Einschwingvorgang
         if (instrType == 3 || instrType == 4) {
             for (int i = 0; i < 16; ++i) buffer[i] += 0.05f * sinf(i * 0.4f);
