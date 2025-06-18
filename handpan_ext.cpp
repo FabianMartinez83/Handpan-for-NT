@@ -326,10 +326,10 @@ static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("Excit. CV", 1, 5)
     { "Resonator Type", 0, 5, 0, kNT_unitEnum, kNT_scalingNone, resonatorTypes },
     { "Noise Level", 0, 100, 35, kNT_unitPercent, kNT_scalingNone, nullptr },
-    { "Noise A", 1, 2000, 64, kNT_unitMs, kNT_scalingNone, nullptr },
-    { "Noise D", 1, 4000, 128, kNT_unitMs, kNT_scalingNone, nullptr },
+    { "Noise A", 1, 512, 64, kNT_unitFrames, kNT_scalingNone, nullptr },
+    { "Noise D", 1, 1024, 128, kNT_unitFrames, kNT_scalingNone, nullptr },
     { "Noise S", 0, 100, 30, kNT_unitPercent, kNT_scalingNone, nullptr },
-    { "Noise R", 1, 8000, 256, kNT_unitMs, kNT_scalingNone, nullptr },
+    { "Noise R", 1, 2048, 256, kNT_unitFrames, kNT_scalingNone, nullptr },
 };
 
 static const uint8_t page1[] = { kParamTrigger, kParamNoteCV, kParamDecay, kParamBaseFreq };
@@ -467,13 +467,10 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     int numFrames = numFramesBy4 * 4;                            // Total number of frames
 
     // Read noise ADSR parameters from UI
-    int noiseA = (int)(self->v[kParamNoiseAttack] * SAMPLE_RATE / 1000.0f);
-    int noiseD = (int)(self->v[kParamNoiseDecay] * SAMPLE_RATE / 1000.0f);
+    int noiseA = self->v[kParamNoiseAttack];
+    int noiseD = self->v[kParamNoiseDecay];
+    int noiseR = self->v[kParamNoiseRelease];
     float noiseS = self->v[kParamNoiseSustain] / 100.0f;
-    int noiseR = (int)(self->v[kParamNoiseRelease] * SAMPLE_RATE / 1000.0f);
-    
-    
-   
     float noiseLevel = self->v[kParamNoiseLevel] / 100.0f;
 
     // Get input and output buffers
