@@ -448,11 +448,11 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
         }
 
         // Low-pass filter
-        if (f % 2 == 0) {
+       
         float alpha = expf(-2.0f * M_PI * 3000.0f / SAMPLE_RATE);
         sample = self->lpState + alpha * (sample - self->lpState);
         self->lpState = sample;
-    }
+    
         // Write to output
         outL[f] = sample * 0.01f;
         outR[f] = sample * 0.01f;
