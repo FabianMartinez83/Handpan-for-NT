@@ -111,14 +111,14 @@ struct Excitation {
         pos = 0;
         for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i) buffer[i] = 0.0f;
 
-        switch (type) {
+        /*switch (type) {
             case 0: for (int i = 0; i < 8; ++i) buffer[i] = 1.0f - i * 0.1f; break;
             case 1: buffer[0] = 1.0f; buffer[1] = 0.6f; buffer[2] = 0.2f; break;
             case 2: for (int i = 0; i < 12; ++i) buffer[i] = 1.0f - (i / 12.0f); break;
             case 3: for (int i = 0; i < 24; ++i) buffer[i] = 0.7f * sinf(i * M_PI / 24.0f); break;
             case 4: buffer[0] = 1.0f; buffer[1] = 0.4f; buffer[2] = 0.0f; break;
         }
-
+*/
         // instrument-typischer Einschwingvorgang
         if (instrType == 3 || instrType == 4) {
             for (int i = 0; i < 16; ++i) buffer[i] += 0.05f * sinf(i * 0.4f);
@@ -414,8 +414,11 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
             float* gains = config.gains;
             for (int m = 0; m < config.count; ++m) {
                 float freq = baseHz * ratios[m];
-                if (inharmOn)
-                    freq *= (1.0f + inharmAmt * ((m % 2 == 0) ? -1 : 1) * 0.01f * m);
+                    if (inharmOn) {
+                    static const float inharmonicOffset[MAX_MODES] = {-0.004f, +0.006f, -0.002f, +0.007f, -0.005f, +0.003f, -0.001f, +0.002f,+0.001f, -0.001f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+                    freq *= (1.0f + inharmAmt * inharmonicOffset[m]);
+                    }
+                freq = fminf(freq, SAMPLE_RATE * 0.45f);
                 float gain = gains[m];
                 float bw = (1.0f / decay) * (0.4f + 0.6f * m / config.count) * dampingFactor;
                 voice.modes[m].init(freq, gain, bw);
