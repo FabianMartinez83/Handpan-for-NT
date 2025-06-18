@@ -1,11 +1,6 @@
 // Disting NT Plugin - Advanced Modal Percussion Synth
 // Author: Fabian Martinez (extended with GPT-4o)
-// Features:
-// - Multiple instrument types (Handpan, Gong, Tabla, etc.)
-// - Excitation signal modeling
-// - Frequency & amplitude envelopes per mode
-// - Inharmonic control
-// - CV input for real-time modulation
+// Features: Modal synthesis, excitation modeling, inharmonic control, noise with ADSR
 
 #include <distingnt/api.h>
 #include <cmath>
@@ -23,62 +18,59 @@
 #ifndef EXCITATION_NOISETABLE_SIZE
 #define EXCITATION_NOISETABLE_SIZE 2048
 #endif
+
 #define NUM_VOICES 8
 #define MAX_MODES 16
-
 #define SAMPLE_RATE NT_globals.sampleRate
 
-
+// Noise table for excitation (not used for per-sample noise)
 float noiseTable[EXCITATION_NOISETABLE_SIZE];
 bool noiseInit = false;
 
+// Soft clipping function to avoid harsh digital clipping
 inline float softclip(float x) {
-    return tanhf(x); // sanftes Clipping, verhindert harte Übersteuerung
+    return tanhf(x);
 }
 
 //--------------------------------------------------------------
-// Structure representing a single resonant mode
+// ModalResonator: represents a single resonant mode
 //--------------------------------------------------------------
-// Struktur ModalResonator mit 6 wählbaren Resonanz-Typen
 struct ModalResonator {
-    float freq, gain, bandwidth;
-    float env, age;
-    float y1, y2;
-    float a1, a2, r;
+    float freq, gain, bandwidth; // Mode parameters
+    float env, age;              // Envelope and age for this mode
+    float y1, y2;                // Filter state
+    float a1, a2, r;             // Filter coefficients
 
+    // Initialize the resonator with frequency, gain, and bandwidth
     void init(float f, float g, float bw) {
-    freq = f;
-    gain = g;
-    bandwidth = bw;
-    bw = fmaxf(bw, 5.0f);  // Mindestbandbreite 5 Hz
+        freq = f;
+        gain = g;
+        bandwidth = fmaxf(bw, 0.05f); // Minimum bandwidth 0.05 Hz
+        env = 1.0f;
+        age = 0.0f;
+        y1 = 0.0f;
+        y2 = 0.0f;
+        r = expf(-M_PI * bandwidth / SAMPLE_RATE);
+        a1 = -2.0f * r * cosf(2.0f * M_PI * freq / SAMPLE_RATE);
+        a2 = r * r;
+    }
 
-    env = 1.0f;
-    age = 0.0f;
-    y1 = 0.0001f * gain;
-    y2 = 0.0001f * gain;
-
-
-
-    r = expf(-M_PI * bandwidth / SAMPLE_RATE);
-    a1 = -2.0f * r * cosf(2.0f * M_PI * freq / SAMPLE_RATE);
-    a2 = r * r;
-}
-
-float process(float x, int type = 0) {
-    switch (type) {
-        case 1: env *= 0.9995f; break; // Typ 1: Exponentielles Decay
-        case 2: x += 0.00005f * y1; break; // Typ 2: Leichte Rückkopplung
-        case 3: x = 0.5f * (x + gain * x); break; // Typ 3: Oversampled Feed
-        case 4: gain *= (0.95f + 0.05f * sinf(age * 3.1415f)); break; // Typ 4: Modulierter Gain
-        case 5: bandwidth *= 1.5f; // Typ 5: Breite Bänder
+    // Process one sample through the resonator
+    float process(float x, int type = 0) {
+        switch (type) {
+            case 1: env *= 0.9995f; break; // Exponential decay
+            case 2: x += 0.00005f * y1; break; // Slight feedback
+            case 3: x = 0.5f * (x + gain * x); break; // Oversampled feed
+            case 4: gain *= (0.95f + 0.05f * sinf(age * 3.1415f)); break; // Modulated gain
+            case 5: // Wide bandwidth
+                bandwidth *= 1.2f;
                 r = expf(-M_PI * bandwidth / SAMPLE_RATE);
                 a1 = -2.0f * r * cosf(2.0f * M_PI * freq / SAMPLE_RATE);
                 a2 = r * r;
                 break;
             default: break;
         }
-
-        float y = gain * x - a1 * y1 - a2 * y2;
+        float y = gain * x - a1 * y1 - a2 * y2; // Resonator difference equation
         y2 = y1;
         y1 = y;
         age += 1.0f / SAMPLE_RATE;
@@ -87,35 +79,37 @@ float process(float x, int type = 0) {
 };
 
 //--------------------------------------------------------------
-// Excitation signal buffer
+// Excitation: buffer for the initial impulse (not for continuous noise)
 //--------------------------------------------------------------
-
-
-
 struct Excitation {
     float buffer[EXCITATION_BUFFER_SIZE];
-    float noiseEnv[EXCITATION_BUFFER_SIZE];
     int pos;
     float mixNoise = 0.0f;
+
+    // Get next sample from the excitation buffer
     float next() {
         float value = (pos < EXCITATION_BUFFER_SIZE ? buffer[pos++] : 0.0f);
-        return softclip(value) * 0.1f; // reduziert Pegel zusätzlich
+        return softclip(value) * 0.1f; // Softclip and attenuate
     }
+
+    // Get current value (for debugging, not used for output)
     float raw() const {
-    int idx = pos < EXCITATION_BUFFER_SIZE ? pos : (EXCITATION_BUFFER_SIZE - 1);
-    return buffer[idx];
+        int idx = pos < EXCITATION_BUFFER_SIZE ? pos : (EXCITATION_BUFFER_SIZE - 1);
+        return buffer[idx];
     }
+
+    // Generate the excitation buffer (impulse shape)
     void generate(int type, int instrType, float inharmonicity = 0.0f, float noiseAmount = 0.0f, int a = 64, int d = 128, float s = 0.0f, int r = 256) {
         if (!noiseInit) {
             for (int i = 0; i < EXCITATION_NOISETABLE_SIZE; ++i)
                 noiseTable[i] = ((rand() % 2000) / 1000.0f) - 1.0f;
             noiseInit = true;
         }
-
         pos = 0;
         for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i) buffer[i] = 0.0f;
 
-            switch (type) {
+        // Different excitation shapes
+        switch (type) {
             case 0: for (int i = 0; i < 8; ++i) buffer[i] = 1.0f - i * 0.1f; break;
             case 1: buffer[0] = 1.0f; buffer[1] = 0.6f; buffer[2] = 0.2f; break;
             case 2: for (int i = 0; i < 12; ++i) buffer[i] = 1.0f - (i / 12.0f); break;
@@ -123,74 +117,56 @@ struct Excitation {
             case 4: buffer[0] = 1.0f; buffer[1] = 0.4f; buffer[2] = 0.0f; break;
         }
 
-        // instrument-typischer Einschwingvorgang
+        // Add a little "strike" for some instruments
         if (instrType == 3 || instrType == 4) {
             for (int i = 0; i < 16; ++i) buffer[i] += 0.05f * sinf(i * 0.4f);
         }
-        mixNoise = noiseAmount;
-        // spezieller Noise-Anteil für Hi-Hat (instrType == 11)
-        if (instrType == 11 || noiseAmount > 0.0f) mixNoise = noiseAmount;
 
-
-        // noise anteil reinmischen
-        if (mixNoise > 0.0f) {
-            for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i) {
-                float env = 0.0f;
-                if (i < a)
-                env = i / (float)a;
-                else if (i < a + d)
-                env = 1.0f - ((i - a) / (float)d) * (1.0f - s);
-                else if (i < a + d + r)
-                env = s * (1.0f - (i - (a + d)) / (float)r);
-                else
-                env = 0.0f;
-
-                noiseEnv[i] = env;
-            }
-        }
-
-        // leichte inharmonizität über sample jitter (optional)
+        // Optional: add inharmonicity to the excitation (not continuous noise)
         if (inharmonicity > 0.0f) {
             for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i)
                 buffer[i] *= 1.0f + 0.002f * inharmonicity * sinf(i * 0.1f);
-
         }
 
-        // mind. 3 werte setzen zur sicherheit
+        // Ensure at least 3 nonzero values
         if (buffer[0] == 0.0f && buffer[1] == 0.0f && buffer[2] == 0.0f) {
             buffer[0] = 0.2f;
             buffer[1] = 0.4f;
             buffer[2] = 0.6f;
         }
     }
-
-    
-
 };
 
+//--------------------------------------------------------------
+// Envelope: generic ADSR envelope
+//--------------------------------------------------------------
+struct Envelope {
+    float env = 0.0f; // Current envelope value
+    int stage = 0;    // 0=off, 1=attack, 2=decay, 3=sustain, 4=release
+    int pos = 0;      // Sample counter for current stage
+};
 
 //--------------------------------------------------------------
-// Structure representing a single voice
+// Voice: one polyphonic voice
 //--------------------------------------------------------------
 struct Voice {
-    bool active;
-    float age;
-    ModalResonator modes[MAX_MODES];
-    Excitation excitation;
+    bool active;                        // Is this voice active?
+    float age;                          // How long has this voice been active?
+    float modeFreqOffset[MAX_MODES];    // Per-mode frequency offsets (not used here)
+    ModalResonator modes[MAX_MODES];    // Modal resonators
+    Excitation excitation;              // Excitation buffer
+    Envelope ampEnv;                    // Amplitude envelope (not used here)
+    Envelope noiseEnv;                  // Noise envelope (for continuous noise)
 };
 
 //--------------------------------------------------------------
 // Main algorithm structure
 //--------------------------------------------------------------
 struct ModalInstrument : _NT_algorithm {
-    Voice voices[NUM_VOICES];
-    float lastTrigger;
-    float lpState;
+    Voice voices[NUM_VOICES]; // All voices
+    float lastTrigger;        // Last trigger state
+    float lpState;            // Lowpass filter state for output
 };
-
-// Ergänzungen für Excitation mit mixNoise und generate(type, instrType)
-
-
 
 //--------------------------------------------------------------
 // Parameters and enums
@@ -217,7 +193,6 @@ enum {
     kParamNoiseDecay,
     kParamNoiseSustain,
     kParamNoiseRelease
-
 };
 
 static const char* instrumentTypes[] = {
@@ -232,7 +207,6 @@ static const char* excitationTypes[] = {
 static const char* resonatorTypes[] = {
     "Standard", "Decay", "DC Loop", "Oversample", "Wobble", "Wide BW"
 };
-
 
 static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("Trigger", 1, 1)
@@ -254,10 +228,7 @@ static const _NT_parameter parameters[] = {
     { "Noise D", 1, 1024, 128, kNT_unitFrames, kNT_scalingNone, nullptr },
     { "Noise S", 0, 100, 30, kNT_unitPercent, kNT_scalingNone, nullptr },
     { "Noise R", 1, 2048, 256, kNT_unitFrames, kNT_scalingNone, nullptr },
-
-
 };
-
 
 static const uint8_t page1[] = { kParamTrigger, kParamNoteCV, kParamDecay, kParamBaseFreq };
 static const uint8_t page2[] = { kParamInstrumentType, kParamExcitationType, kParamInharmLevel, kParamInharmEnable, kParamNoiseLevel, kParamNoiseAttack, kParamNoiseDecay, kParamNoiseSustain, kParamNoiseRelease };
@@ -265,20 +236,18 @@ static const uint8_t page3[] = { kParamOutputL, kParamOutputModeL, kParamOutputR
 static const uint8_t page4[] = { kParamBaseFreqCV, kParamDecayCV, kParamExcitationCV };
 static const uint8_t page5[] = { kParamResonatorType };
 
-// Define the parameter pages
 static const _NT_parameterPage pages[] = {
     { "Modal Synth", ARRAY_SIZE(page1), page1 },
     { "Timbre & FX", ARRAY_SIZE(page2), page2 },
     { "Outputs", ARRAY_SIZE(page3), page3 },
     { "CV Inputs", ARRAY_SIZE(page4), page4 },
     { "Resonator", ARRAY_SIZE(page5), page5 }
-
 };
 
 static const _NT_parameterPages parameterPages = { ARRAY_SIZE(pages), pages };
 
 //--------------------------------------------------------------
-// Instrument modal definition factory
+// ModalConfig: defines the modal structure for each instrument
 //--------------------------------------------------------------
 struct ModalConfig {
     float ratios[MAX_MODES];
@@ -286,71 +255,83 @@ struct ModalConfig {
     int count;
 };
 
+// Returns the modal configuration for the selected instrument type
 ModalConfig getModalConfig(int type) {
     ModalConfig config;
     switch (type) {
-        case 0: // Handpan
-            config = { {1.00f,1.95f,2.76f,3.76f,4.83f,5.85f,6.93f,7.96f}, {1,0.8,0.6,0.4,0.3,0.2,0.15,0.1}, 8 }; break;
-        case 1: // Steel Drum
-            config = { {1.0f,2.1f,3.2f,4.3f,5.4f}, {1,0.7,0.5,0.3,0.2}, 5 }; break;
-        case 2: // Bell
-            config = { {1.0f,2.7f,4.3f,5.2f,6.8f}, {1,0.6,0.5,0.3,0.2}, 5 }; break;
-        case 3: // Gong
-            config = { {1.0f,2.01f,2.9f,4.1f,5.3f}, {1,0.6,0.4,0.3,0.2}, 5 }; break;
-        case 4: // Triangle
-            config = { {1.0f,2.1f,3.5f,5.6f}, {1,0.6,0.4,0.3}, 4 }; break;
-        case 5: // Tabla
-            config = { {1.0f,1.5f,2.4f,3.5f,4.6f}, {1,0.7,0.5,0.4,0.3}, 5 }; break;
-        case 6: // Conga
-            config = { {1.0f,1.6f,2.3f,3.1f}, {1,0.6,0.4,0.3}, 4 }; break;
-        case 7: // Tom
-            config = { {1.0f,1.9f,2.6f,3.8f}, {1,0.5,0.3,0.2}, 4 }; break;
-        case 8: // Timpani
-            config = { {1.0f,1.5f,2.0f,2.8f,3.6f}, {1,0.8,0.6,0.4,0.2}, 5 }; break;
-        case 9: // Udu
-            config = { {1.0f,1.6f,2.5f,3.3f}, {1,0.5,0.3,0.2}, 4 }; break;
-        case 10: // Slit Drum
-            config = { {1.0f,2.0f,3.2f,4.6f}, {1,0.7,0.5,0.3}, 4 }; break;
-        case 11: // Hi-Hat
-            config = { {1.0f,1.7f,2.9f,4.4f,6.1f}, {1,0.5,0.4,0.3,0.2}, 5 }; break;
-        case 12: // Cowbell
-            config = { {1.0f,2.1f,3.9f,5.7f}, {1,0.4,0.3,0.2}, 4 }; break;
-        case 13: // Frame Drum
-            config = { {1.0f,1.4f,2.3f,3.2f}, {1,0.6,0.4,0.2}, 4 }; break;
-        default:
-            config = { {1,2,3,4,5,6,7,8,9,10,11,12}, {1,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.15,0.1,0.08,0.06}, 12 }; break;
+        case 0: config = { {1.00f,1.95f,2.76f,3.76f,4.83f,5.85f,6.93f,7.96f}, {1,0.8,0.6,0.4,0.3,0.2,0.15,0.1}, 8 }; break;
+        case 1: config = { {1.0f,2.1f,3.2f,4.3f,5.4f}, {1,0.7,0.5,0.3,0.2}, 5 }; break;
+        case 2: config = { {1.0f,2.7f,4.3f,5.2f,6.8f}, {1,0.6,0.5,0.3,0.2}, 5 }; break;
+        case 3: config = { {1.0f,2.01f,2.9f,4.1f,5.3f}, {1,0.6,0.4,0.3,0.2}, 5 }; break;
+        case 4: config = { {1.0f,2.1f,3.5f,5.6f}, {1,0.6,0.4,0.3}, 4 }; break;
+        case 5: config = { {1.0f,1.5f,2.4f,3.5f,4.6f}, {1,0.7,0.5,0.4,0.3}, 5 }; break;
+        case 6: config = { {1.0f,1.6f,2.3f,3.1f}, {1,0.6,0.4,0.3}, 4 }; break;
+        case 7: config = { {1.0f,1.9f,2.6f,3.8f}, {1,0.5,0.3,0.2}, 4 }; break;
+        case 8: config = { {1.0f,1.5f,2.0f,2.8f,3.6f}, {1,0.8,0.6,0.4,0.2}, 5 }; break;
+        case 9: config = { {1.0f,1.6f,2.5f,3.3f}, {1,0.5,0.3,0.2}, 4 }; break;
+        case 10: config = { {1.0f,2.0f,3.2f,4.6f}, {1,0.7,0.5,0.3}, 4 }; break;
+        case 11: config = { {1.0f,1.7f,2.9f,4.4f,6.1f}, {1,0.5,0.4,0.3,0.2}, 5 }; break;
+        case 12: config = { {1.0f,2.1f,3.9f,5.7f}, {1,0.4,0.3,0.2}, 4 }; break;
+        case 13: config = { {1.0f,1.4f,2.3f,3.2f}, {1,0.6,0.4,0.2}, 4 }; break;
+        default: config = { {1,2,3,4,5,6,7,8,9,10,11,12}, {1,0.8,0.7,0.6,0.5,0.4,0.3,0.2,0.15,0.1,0.08,0.06}, 12 }; break;
     }
     return config;
 }
-
-
 
 //--------------------------------------------------------------
 // Algorithm construct function
 //--------------------------------------------------------------
 _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs, const _NT_algorithmRequirements& req, const int32_t*) {
-    ModalInstrument* self = new(ptrs.sram) ModalInstrument;
-    self->parameters = parameters;
-    self->parameterPages = &parameterPages;
-    self->lastTrigger = 0.0f;
-    self->lpState = 0.0f;
+    ModalInstrument* self = new(ptrs.sram) ModalInstrument; // Allocate ModalInstrument in SRAM
+    self->parameters = parameters;                          // Set parameter array
+    self->parameterPages = &parameterPages;                 // Set parameter pages
+    self->lastTrigger = 0.0f;                              // Initialize last trigger state
+    self->lpState = 0.0f;                                  // Initialize lowpass filter state
     return self;
+}
+
+//--------------------------------------------------------------
+// Compute a generic ADSR envelope (used for noise)
+//--------------------------------------------------------------
+float computeADSR(Envelope& env, int attack, int decay, float sustain, int release) {
+    float value = 0.0f;
+    switch (env.stage) {
+        case 1: // Attack
+            value = env.pos / (float)attack;
+            if (++env.pos >= attack) { env.stage = 2; env.pos = 0; }
+            break;
+        case 2: // Decay
+            value = 1.0f - (1.0f - sustain) * env.pos / (float)decay;
+            if (++env.pos >= decay) { env.stage = 3; env.pos = 0; }
+            break;
+        case 3: // Sustain
+            value = sustain;
+            break;
+        case 4: // Release
+            value = env.env * (1.0f - env.pos / (float)release);
+            if (++env.pos >= release) { env.stage = 0; value = 0.0f; }
+            break;
+        default: value = 0.0f; break;
+    }
+    env.env = value;
+    return value;
 }
 
 //--------------------------------------------------------------
 // Main processing loop
 //--------------------------------------------------------------
-inline float getCVOrParam(float* cv, int f, float paramValue, float scale = 1.0f, float threshold = 0.001f) {
-    return (cv && fabsf(cv[f]) > threshold) ? (cv[f] * scale) : paramValue;
-}
 extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
-    ModalInstrument* self = static_cast<ModalInstrument*>(base);
-    int numFrames = numFramesBy4 * 4;
+    ModalInstrument* self = static_cast<ModalInstrument*>(base); // Cast to our struct
+    int numFrames = numFramesBy4 * 4;                            // Total number of frames
+
+    // Read noise ADSR parameters from UI
     int noiseA = self->v[kParamNoiseAttack];
     int noiseD = self->v[kParamNoiseDecay];
     float noiseS = self->v[kParamNoiseSustain] / 100.0f;
     int noiseR = self->v[kParamNoiseRelease];
-    // Get input buffers
+    float noiseLevel = self->v[kParamNoiseLevel] / 100.0f;
+
+    // Get input and output buffers
     float* trig = busFrames + (self->v[kParamTrigger] - 1) * numFrames;
     float* noteCV = busFrames + (self->v[kParamNoteCV] - 1) * numFrames;
     float* outL = busFrames + (self->v[kParamOutputL] - 1) * numFrames;
@@ -358,42 +339,47 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     float* cvFreq = self->v[kParamBaseFreqCV] ? busFrames + (self->v[kParamBaseFreqCV] - 1) * numFrames : nullptr;
     float* cvDecay = self->v[kParamDecayCV] ? busFrames + (self->v[kParamDecayCV] - 1) * numFrames : nullptr;
     float* cvExcit = self->v[kParamExcitationCV] ? busFrames + (self->v[kParamExcitationCV] - 1) * numFrames : nullptr;
-   
+
     // Clear output buffers
     memset(outL, 0, numFrames * sizeof(float));
     memset(outR, 0, numFrames * sizeof(float));
 
-    // Get parameter values
-    float baseHzParam = self->v[kParamBaseFreq] / 100.0f; // Base frequency parameter
-    float decayParam = fmaxf(self->v[kParamDecay], 100) / 1000.0f; // Decay parameter
-    bool inharmOn = self->v[kParamInharmEnable] > 0; // Inharmonicity toggle
-    float inharmAmt = self->v[kParamInharmLevel] / 100.0f; // Inharmonicity amount
-    int instrType = self->v[kParamInstrumentType]; // Instrument type
-    int excTypeParam = self->v[kParamExcitationType]; // Excitation type parameter
-    float noiseLevel = self->v[kParamNoiseLevel] / 100.0f;
+    // Read other parameters
+    float baseHzParam = self->v[kParamBaseFreq] / 100.0f;
+    // float decayParam = fmaxf(self->v[kParamDecay], 100) / 1000.0f; // <- entfernen
+    bool inharmOn = self->v[kParamInharmEnable] > 0;
+    float inharmAmt = self->v[kParamInharmLevel] / 100.0f;
+    int instrType = self->v[kParamInstrumentType];
+    int excTypeParam = self->v[kParamExcitationType];
 
-    ModalConfig config = getModalConfig(instrType); // Get modal configuration for the selected instrument
-    float gateState = self->lastTrigger; // Track the previous gate state
+    ModalConfig config = getModalConfig(instrType); // Get modal config for instrument
+    float gateState = self->lastTrigger;            // Previous gate state
 
     for (int f = 0; f < numFrames; ++f) {
-        // Combine Base Freq parameter and CV input
+        // Calculate base frequency with CV and parameter
         float noteV = noteCV ? noteCV[f] : 0.0f;
-        float noteFactor = powf(2.0f, noteV); // Convert note CV to frequency factor
+        float noteFactor = powf(2.0f, noteV);
         float cvBase = (cvFreq && fabsf(cvFreq[f]) > 0.001f) ? cvFreq[f] : 0.0f;
         float baseHz = ((cvBase > 0.0f) ? fmaxf(cvBase, 20.0f) : baseHzParam) * noteFactor;
-        // Combine Decay parameter and CV input
-        float cvD = (cvDecay && fabsf(cvDecay[f]) > 0.001f) ? cvDecay[f] : 0.0f;
-        float decay = (cvD > 0.0f) ? fmaxf(cvD * 1000.0f, 100.0f) / 1000.0f : decayParam;
-        // Combine Excitation parameter and CV input
+
+        // Calculate decay with CV and parameter
+        float decayCV = (cvDecay ? cvDecay[f] : 0.0f);
+        float decayMs = self->v[kParamDecay] + decayCV * 8000.0f; // CV skaliert auf 0...8s
+        decayMs = fmaxf(decayMs, 100.0f);
+        float decay = decayMs / 1000.0f;
+
+        // Calculate excitation type with CV and parameter
         int excType = excTypeParam;
         if (cvExcit && fabsf(cvExcit[f]) > 0.01f) {
             excType = static_cast<int>(fminf(cvExcit[f] * 4.99f, 4.0f));
         }
-        // Gate logic
+
+        // Gate logic: detect rising edge
         float currentGate = trig[f];
         bool gateOn = (currentGate >= 0.5f);
 
-        if (!gateState && gateOn) { // Trigger on rising edge
+        // On trigger (rising edge), allocate a voice and initialize
+        if (!gateState && gateOn) {
             int voiceToUse = -1;
             float maxAge = -1.0f;
             for (int v = 0; v < NUM_VOICES; ++v) {
@@ -405,25 +391,25 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
                     voiceToUse = v;
                 }
             }
-
             Voice& voice = self->voices[voiceToUse];
-            voice.excitation.generate(excType,instrType,inharmOn ? inharmAmt : 0.0f,noiseLevel,noiseA,noiseD,noiseS,noiseR);
-            
+            voice.excitation.generate(excType, instrType, inharmOn ? inharmAmt : 0.0f, noiseLevel, noiseA, noiseD, noiseS, noiseR);
+            voice.noiseEnv.stage = 1; // Start noise envelope (attack)
+            voice.noiseEnv.pos = 0;
+            voice.noiseEnv.env = 0.0f;
 
             float dampingFactor = 1.0f;
-            if (instrType == 3 || instrType == 4) dampingFactor = 0.7f; // Gong/Triangle damping
-            else if (instrType == 8) decay *= 2.5f; // Timpani decay adjustment
-            else if (instrType == 13) decay *= 2.0f; // Frame Drum decay adjustment
+            if (instrType == 3 || instrType == 4) dampingFactor = 0.7f; // Gong/Triangle
+            else if (instrType == 8) decay *= 2.5f; // Timpani
+            else if (instrType == 13) decay *= 2.0f; // Frame Drum
 
-            // Get configuration for the selected instrument
             float* ratios = config.ratios;
             float* gains = config.gains;
             for (int m = 0; m < config.count; ++m) {
                 float freq = baseHz * ratios[m];
-                    if (inharmOn) {
-                    static const float inharmonicOffset[MAX_MODES] = {-0.004f, +0.006f, -0.002f, +0.007f, -0.005f, +0.003f, -0.001f, +0.002f,+0.001f, -0.001f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+                if (inharmOn) {
+                    static const float inharmonicOffset[MAX_MODES] = {-0.004f, +0.006f, -0.002f, +0.007f, -0.005f, +0.003f, -0.001f, +0.002f, +0.001f, -0.001f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
                     freq *= (1.0f + inharmAmt * inharmonicOffset[m]);
-                    }
+                }
                 freq = fminf(freq, SAMPLE_RATE * 0.35f);
                 float gain = gains[m];
                 float bw = (1.0f / decay) * (0.4f + 0.6f * m / config.count) * dampingFactor;
@@ -433,46 +419,61 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
             voice.age = 0.0f;
         }
 
-        gateState = gateOn;
+        // On gate off, start noise envelope release for all active voices
+        if (gateState && !gateOn) {
+            for (int v = 0; v < NUM_VOICES; ++v) {
+                if (self->voices[v].active) {
+                    self->voices[v].noiseEnv.stage = 4; // Release
+                    self->voices[v].noiseEnv.pos = 0;
+                }
+            }
+        }
 
-        // Process voices
+        gateState = gateOn; // Update previous gate state
+
+        // Process all voices
         float sample = 0.0f;
         for (int v = 0; v < NUM_VOICES; ++v) {
             if (!self->voices[v].active) continue;
-            float exc = self->voices[v].excitation.next();
-            // direktes Noise-Signal hörbar machen
+            float exc = self->voices[v].excitation.next(); // Get next excitation sample
 
             float sum = 0.0f;
             bool silent = true;
             for (int m = 0; m < config.count; ++m) {
                 float s = self->voices[v].modes[m].process(exc, self->v[kParamResonatorType]);
-
                 sum += s;
                 if (fabsf(s) > 0.0005f) silent = false;
             }
-            float rawExc = self->voices[v].excitation.raw();
-            sample += rawExc * 0.2f * noiseLevel; 
-            if (silent) self->voices[v].active = false;
-            sample += sum;
-            self->voices[v].age += 1.0f / SAMPLE_RATE;
+
+            // --- CONTINUOUS NOISE LAYER ---
+            // Compute noise envelope for this voice
+            float noiseEnv = computeADSR(self->voices[v].noiseEnv, noiseA, noiseD, noiseS, noiseR);
+            // Generate white noise sample in [-1, 1]
+            float noise = (((rand() % 2000) / 1000.0f) - 1.0f) * noiseEnv * noiseLevel;
+            // Add noise to output sample
+            sample += noise;
+
+            if (silent) self->voices[v].active = false; // Deactivate if silent
+            sample += sum; // Add modal sum to output
+            self->voices[v].age += 1.0f / SAMPLE_RATE; // Advance voice age
         }
 
-        // Low-pass filter
-       
+        // Output lowpass filter for smoothing
         float alpha = expf(-2.0f * M_PI * 3000.0f / SAMPLE_RATE);
         sample = self->lpState + alpha * (sample - self->lpState);
         self->lpState = sample;
-   
-        // Write to output
+
+        // Write output (attenuated)
         outL[f] = sample * 0.1f;
         outR[f] = sample * 0.1f;
     }
 
-    self->lastTrigger = gateState;
+    self->lastTrigger = gateState; // Store last trigger state
 }
 
-
-
+//--------------------------------------------------------------
+// Required Disting NT API functions
+//--------------------------------------------------------------
 extern "C" void parameterChanged(_NT_algorithm*, int) {}
 extern "C" void calculateRequirements(_NT_algorithmRequirements& req, const int32_t*) {
     req.numParameters = ARRAY_SIZE(parameters);
