@@ -47,17 +47,24 @@ inline float softclip(float x) {
 //--------------------------------------------------------------
 // ModalResonator: represents a single resonant mode
 //--------------------------------------------------------------
+// ModalResonator: 2nd-order resonator with multiple sound-shaping types
 struct ModalResonator {
-    float freq, gain, bandwidth; // Mode parameters
-    float env, age;              // Envelope and age for this mode
-    float y1, y2;                // Filter state
-    float a1, a2, r;             // Filter coefficients
+    float freq = 0.0f;      // Resonance frequency (Hz)
+    float gain = 1.0f;      // Resonator gain
+    float bandwidth = 0.1f; // Bandwidth (Hz)
+    float env = 1.0f;       // Envelope (for exponential decay)
+    float age = 0.0f;       // Age in seconds since trigger
+    float y1 = 0.0f, y2 = 0.0f; // Previous outputs (for difference equation)
+    float a1 = 0.0f, a2 = 0.0f; // Filter coefficients
+    float r = 0.0f;             // Pole radius (for coefficient calculation)
 
-    // Initialize the resonator with frequency, gain, and bandwidth
-    void init(float f, float g, float bw) {
+    // Initialize the resonator (call on trigger)
+    void init(float f, float g, float bw, int type = 0) {
         freq = f;
         gain = g;
-        bandwidth = fmaxf(bw, 0.05f); // Minimum bandwidth 0.05 Hz
+        // For "damped" type, increase bandwidth for a shorter, woodier sound
+        if (type == 3) bw *= 1.5f;
+        bandwidth = fmaxf(bw, 0.05f);
         env = 1.0f;
         age = 0.0f;
         y1 = 0.0f;
@@ -67,29 +74,84 @@ struct ModalResonator {
         a2 = r * r;
     }
 
-    // Process one sample through the resonator
-    float process(float x, int type = 0) {
-        switch (type) {
-            case 1: env *= 0.9995f; break; // Exponential decay
-            case 2: x += 0.00005f * y1; break; // Slight feedback
-            case 3: x = 0.5f * (x + gain * x); break; // Oversampled feed
-            case 4: gain *= (0.95f + 0.05f * sinf(age * 3.1415f)); break; // Modulated gain
-            case 5: // Wide bandwidth
-                bandwidth *= 1.2f;
-                r = expf(-M_PI * bandwidth / SAMPLE_RATE);
-                a1 = -2.0f * r * cosf(2.0f * M_PI * freq / SAMPLE_RATE);
-                a2 = r * r;
-                break;
-            default: break;
-        }
-        float y = gain * x - a1 * y1 - a2 * y2; // Resonator difference equation
-        y2 = y1;
-        y1 = y;
-        age += 1.0f / SAMPLE_RATE;
-        return y * env;
+float process(float x, int type = 0) {
+    switch (type) {
+        case 0: // Standard: classic 2nd-order resonator
+            break;
+        case 1: // Fast Decay: slightly faster envelope decay
+            env *= 0.9985f;
+            break;
+        case 2: // Soft Clipping: gentle limiting for analog feel
+            if (x > 1.0f) x = 1.0f;
+            if (x < -1.0f) x = -1.0f;
+            break;
+        case 3: // Dynamic Gain: gently modulates gain with envelope
+            gain *= (0.999f + 0.001f * env);
+            break;
+        case 4: // Envelope Damping: input is damped by envelope
+            x *= env;
+            break;
+        case 5: // Age Damping: gain decreases gently with age
+            gain *= (1.0f - 0.00002f * age);
+            break;
+        case 6: // Gentle Asymmetry: very subtle nonlinearity
+            if (x > 0) x *= 1.01f;
+            else x *= 0.99f;
+            break;
+        case 7: // Envelope-shaped Gain: gain follows envelope
+            gain *= (0.995f + 0.005f * env);
+            break;
+        case 8: // Soft Limiter: compresses only strong peaks
+            if (x > 0.8f) x = 0.8f + 0.1f * (x - 0.8f);
+            if (x < -0.8f) x = -0.8f + 0.1f * (x + 0.8f);
+            break;
+        case 9: // Gentle Highpass: removes a bit of DC
+            x = x - 0.01f * y1;
+            break;
+        case 10: // Subtle Brightness: slightly emphasizes high frequencies
+            x += 0.0001f * (x - y1);
+            break;
+        case 11: // Envelope-Driven Soft Clip
+            if (x > env) x = env + 0.1f * (x - env);
+            if (x < -env) x = -env + 0.1f * (x + env);
+            break;
+        case 12: // Gentle Output Damping
+            y1 *= 0.9995f;
+            y2 *= 0.9995f;
+            break;
+        case 13: // Subtle Phase Flip: inverts phase for a different color
+            x = -x;
+            break;
+        case 14: // Subtle Even Harmonics: adds a tiny bit of y1 for color
+            x += 0.00005f * y1;
+            break;
+        case 15: // Gentle Output Limiter
+            if (y1 > 1.0f) y1 = 1.0f;
+            if (y1 < -1.0f) y1 = -1.0f;
+            break;
+        case 16: // Subtle Odd Harmonics
+            x += 0.00005f * y2;
+            break;
+        case 17: // Envelope-Driven Asymmetry
+            if (x > 0) x *= (1.0f + 0.005f * env);
+            else x *= (1.0f - 0.005f * env);
+            break;
+        case 18: // Gentle Output Highpass
+            y1 -= 0.0001f * y2;
+            break;
+        case 19: // Subtle Dynamic Decay
+            env *= (0.9998f - 0.0001f * env);
+            break;
+        default:
+            break;
     }
+    float y = gain * x - a1 * y1 - a2 * y2;
+    y2 = y1;
+    y1 = y;
+    age += 1.0f / SAMPLE_RATE;
+    return y * env;
+}
 };
-
 //--------------------------------------------------------------
 // Excitation: buffer for the initial impulse (not for continuous noise)
 //--------------------------------------------------------------
@@ -227,7 +289,8 @@ struct Voice {
 //--------------------------------------------------------------
 struct ModalInstrument : _NT_algorithm {
     Voice voices[NUM_VOICES]; // All voices
-    float lastTrigger;        // Last trigger state
+    float lastTrigger1;
+    float lastTrigger2;       // Last trigger state
     float lpState;            // Lowpass filter state for output
 };
 
@@ -235,8 +298,10 @@ struct ModalInstrument : _NT_algorithm {
 // Parameters and enums
 //--------------------------------------------------------------
 enum {
-    kParamTrigger = 0,
-    kParamNoteCV,
+    kParamTrigger1 = 0,
+    kParamTrigger2,
+    kParamNoteCV1,
+    kParamNoteCV2,
     kParamDecay,
     kParamBaseFreq,
     kParamInstrumentType,
@@ -319,32 +384,53 @@ static const char* excitationTypes[] = {
 };
 
 static const char* resonatorTypes[] = {
-    "Standard", "Decay", "DC Loop", "Oversample", "Wobble", "Wide BW"
+    "Standard",      // 0
+    "Fast Decay",    // 1
+    "Soft Clip",     // 2
+    "Dyn Gain",      // 3
+    "Env Damp",      // 4
+    "Age Damp",      // 5
+    "Asymmetry",     // 6
+    "Env Gain",      // 7
+    "Limiter",       // 8
+    "Highpass",      // 9
+    "Bright",        // 10
+    "Env Clip",      // 11
+    "Out Damp",      // 12
+    "Phase Flip",    // 13
+    "Even Harm",     // 14
+    "Out Lim",       // 15
+    "Odd Harm",      // 16
+    "Env Asym",      // 17
+    "Out HP",        // 18
+    "Dyn Decay"      // 19
 };
 
 static const _NT_parameter parameters[] = {
-    NT_PARAMETER_AUDIO_INPUT("Trigger", 1, 1)
-    NT_PARAMETER_CV_INPUT("Note CV", 1, 2)
-    { "Decay", 100, 8000, 1500, kNT_unitMs, kNT_scalingNone, nullptr },
-    { "Base Freq", 40, 4000, 440, kNT_unitHz, kNT_scalingNone, nullptr },
+    NT_PARAMETER_AUDIO_INPUT("Trigger 1", 1, 1)
+    NT_PARAMETER_AUDIO_INPUT("Trigger 2", 1, 2)
+    NT_PARAMETER_CV_INPUT("Note CV 1", 1, 3)
+    NT_PARAMETER_CV_INPUT("Note CV 2", 1, 4)
+    { "Decay", 100, 8000, 1200, kNT_unitMs, kNT_scalingNone, nullptr },
+    { "Base Freq", 40, 4000, 110, kNT_unitHz, kNT_scalingNone, nullptr },
     { "Instrument", 0, 50, 0, kNT_unitEnum, kNT_scalingNone, instrumentTypes },
     { "Excitation", 0, 16, 0, kNT_unitEnum, kNT_scalingNone, excitationTypes },
     { "Inharm Amt", 0, 100, 20, kNT_unitPercent, kNT_scalingNone, nullptr },
     { "Inharm On", 0, 1, 1, kNT_typeBoolean, kNT_scalingNone, nullptr },
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Out L", 1, 13)
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Out R", 1, 14)
-    NT_PARAMETER_CV_INPUT("BaseFreq CV", 1, 3)
-    NT_PARAMETER_CV_INPUT("Decay CV", 1, 4)
-    NT_PARAMETER_CV_INPUT("Excit. CV", 1, 5)
-    { "Resonator Type", 0, 5, 0, kNT_unitEnum, kNT_scalingNone, resonatorTypes },
-    { "Noise Level", 0, 100, 35, kNT_unitPercent, kNT_scalingNone, nullptr },
+    NT_PARAMETER_CV_INPUT("BaseFreq CV", 1, 5)
+    NT_PARAMETER_CV_INPUT("Decay CV", 1, 6)
+    NT_PARAMETER_CV_INPUT("Excit. CV", 1, 7)
+    { "Resonator Type", 0, 19, 0, kNT_unitEnum, kNT_scalingNone, resonatorTypes },
+    { "Noise Level", 0, 100, 0, kNT_unitPercent, kNT_scalingNone, nullptr },
     { "Noise A", 1, 512, 64, kNT_unitFrames, kNT_scalingNone, nullptr },
     { "Noise D", 1, 1024, 128, kNT_unitFrames, kNT_scalingNone, nullptr },
     { "Noise S", 0, 100, 30, kNT_unitPercent, kNT_scalingNone, nullptr },
     { "Noise R", 1, 2048, 256, kNT_unitFrames, kNT_scalingNone, nullptr },
 };
 
-static const uint8_t page1[] = { kParamTrigger, kParamNoteCV, kParamDecay, kParamBaseFreq };
+static const uint8_t page1[] = { kParamTrigger1, kParamTrigger2, kParamNoteCV1, kParamNoteCV2, kParamDecay, kParamBaseFreq };
 static const uint8_t page2[] = { kParamInstrumentType, kParamExcitationType, kParamInharmLevel, kParamInharmEnable, kParamNoiseLevel, kParamNoiseAttack, kParamNoiseDecay, kParamNoiseSustain, kParamNoiseRelease };
 static const uint8_t page3[] = { kParamOutputL, kParamOutputModeL, kParamOutputR, kParamOutputModeR };
 static const uint8_t page4[] = { kParamBaseFreqCV, kParamDecayCV, kParamExcitationCV };
@@ -439,7 +525,8 @@ _NT_algorithm* construct(const _NT_algorithmMemoryPtrs& ptrs, const _NT_algorith
     ModalInstrument* self = new(ptrs.sram) ModalInstrument; // Allocate ModalInstrument in SRAM
     self->parameters = parameters;                          // Set parameter array
     self->parameterPages = &parameterPages;                 // Set parameter pages
-    self->lastTrigger = 0.0f;                              // Initialize last trigger state
+    self->lastTrigger1 = 0.0f;     
+    self->lastTrigger2 = 0.0f;                           // Initialize last trigger state
     self->lpState = 0.0f;                                  // Initialize lowpass filter state
     return self;
 }
@@ -471,90 +558,152 @@ float computeADSR(Envelope& env, int attack, int decay, float sustain, int relea
     return value;
 }
 
-//--------------------------------------------------------------
-// Main processing loop
-//--------------------------------------------------------------
 extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
-    ModalInstrument* self = static_cast<ModalInstrument*>(base); // Cast to our struct
-    int numFrames = numFramesBy4 * 4;                            // Total number of frames
+    // Cast the base pointer to your ModalInstrument struct
+    ModalInstrument* self = static_cast<ModalInstrument*>(base);
 
-    // Read noise ADSR parameters from UI
-    int noiseA = self->v[kParamNoiseAttack];
-    int noiseD = self->v[kParamNoiseDecay];
-    int noiseR = self->v[kParamNoiseRelease];
-    float noiseS = self->v[kParamNoiseSustain] / 100.0f;
-    float noiseLevel = self->v[kParamNoiseLevel] / 100.0f;
+    // Calculate the total number of frames for this audio block
+    int numFrames = numFramesBy4 * 4;
 
-    // Get input and output buffers
-    float* trig = busFrames + (self->v[kParamTrigger] - 1) * numFrames;
-    float* noteCV = (self->v[kParamNoteCV] ? busFrames + (self->v[kParamNoteCV] - 1) * numFrames : nullptr);
+    // === Read input and output buffers ===
+    // Get pointers to the trigger and note CV inputs for both hands
+    float* trig1   = busFrames + (self->v[kParamTrigger1] - 1) * numFrames; // Trigger input for hand 1
+    float* trig2   = busFrames + (self->v[kParamTrigger2] - 1) * numFrames; // Trigger input for hand 2
+    float* noteCV1 = (self->v[kParamNoteCV1] ? busFrames + (self->v[kParamNoteCV1] - 1) * numFrames : nullptr); // Note CV for hand 1
+    float* noteCV2 = (self->v[kParamNoteCV2] ? busFrames + (self->v[kParamNoteCV2] - 1) * numFrames : nullptr); // Note CV for hand 2
+
+    // Optional: CV for base frequency, decay, excitation (shared for both hands)
+    float* cvFreq  = (self->v[kParamBaseFreqCV] ? busFrames + (self->v[kParamBaseFreqCV] - 1) * numFrames : nullptr);
+    float* cvDecay = (self->v[kParamDecayCV]    ? busFrames + (self->v[kParamDecayCV]    - 1) * numFrames : nullptr);
+    float* cvExcit = (self->v[kParamExcitationCV] ? busFrames + (self->v[kParamExcitationCV] - 1) * numFrames : nullptr);
+
+    // Output buffers for left and right channels
     float* outL = busFrames + (self->v[kParamOutputL] - 1) * numFrames;
     float* outR = busFrames + (self->v[kParamOutputR] - 1) * numFrames;
-    float* cvFreq = self->v[kParamBaseFreqCV] ? busFrames + (self->v[kParamBaseFreqCV] - 1) * numFrames : nullptr;
-    float* cvDecay = self->v[kParamDecayCV] ? busFrames + (self->v[kParamDecayCV] - 1) * numFrames : nullptr;
-    float* cvExcit = self->v[kParamExcitationCV] ? busFrames + (self->v[kParamExcitationCV] - 1) * numFrames : nullptr;
 
-    // Clear output buffers
-    memset(outL, 0, numFrames * sizeof(float));
-    memset(outR, 0, numFrames * sizeof(float));
+    // === Read UI parameters ===
+    float baseHzParam = self->v[kParamBaseFreq];           // Base frequency from UI (Hz)
+    float decayParam  = self->v[kParamDecay];              // Decay time from UI (ms)
+    int instrType     = self->v[kParamInstrumentType];     // Instrument type (Handpan, Gong, etc.)
+    int excTypeParam  = self->v[kParamExcitationType];     // Excitation type from UI
+    bool inharmOn     = self->v[kParamInharmEnable] > 0;   // Inharmonicity enable
+    float inharmAmt   = self->v[kParamInharmLevel] / 100.0f; // Inharmonicity amount (0..1)
+    float noiseLevel  = self->v[kParamNoiseLevel] / 100.0f;  // Noise level (0..1)
+    int noiseA        = self->v[kParamNoiseAttack];        // Noise envelope attack (samples)
+    int noiseD        = self->v[kParamNoiseDecay];         // Noise envelope decay (samples)
+    int noiseR        = self->v[kParamNoiseRelease];       // Noise envelope release (samples)
+    float noiseS      = self->v[kParamNoiseSustain] / 100.0f; // Noise envelope sustain (0..1)
 
-    // Read other parameters
-  
-  
-    bool inharmOn = self->v[kParamInharmEnable] > 0;
-    float inharmAmt = self->v[kParamInharmLevel] / 100.0f;
-    int instrType = self->v[kParamInstrumentType];
-    int excTypeParam = self->v[kParamExcitationType];
+    // Get modal configuration for the selected instrument
+    ModalConfig config = getModalConfig(instrType);
 
-    ModalConfig config = getModalConfig(instrType); // Get modal config for instrument
-    float gateState = self->lastTrigger;            // Previous gate state
+    // === Prepare output buffers ===
+    memset(outL, 0, numFrames * sizeof(float)); // Clear left output buffer
+    memset(outR, 0, numFrames * sizeof(float)); // Clear right output buffer
 
+    // === State for gate detection (per hand) ===
+    float gateState1 = self->lastTrigger1; // Previous gate state for hand 1
+    float gateState2 = self->lastTrigger2; // Previous gate state for hand 2
+
+    // === Main audio processing loop ===
     for (int f = 0; f < numFrames; ++f) {
-
-        float baseHzParam = self->v[kParamBaseFreq]; // UI-Value in Hz
-        float baseHz = baseHzParam; // Standard: UI-Value
-
-        // if available, it uses CV for base frequency
+        // --- HAND 1: Calculate base frequency ---
+        float baseHz1 = baseHzParam; // Start with UI base frequency
+        // If a base frequency CV is present, override the UI value
         if (cvFreq && fabsf(cvFreq[f]) > 0.01f) {
-        float cv = cvFreq[f];
-        float cvNorm = (cv + 5.0f) / 10.0f;  // normiert -5V...+5V auf 0...1
-        baseHz = 40.0f + cvNorm * (4000.0f - 40.0f);
+            float cv = cvFreq[f];
+            float cvNorm = (cv + 5.0f) / 10.0f; // Normalize -5V..+5V to 0..1
+            baseHz1 = 40.0f + cvNorm * (4000.0f - 40.0f); // Map to 40..4000 Hz
         }
-
-       // if available it transposes the base frequency by note CV
-        // Note CV: Transpose base frequency by note CV
-        // Note: CV is expected to be in the range -5V to +5V, where 0V is the base frequency
-        // Transpose by a factor of 2^(CV/12) to match musical intervals
-        // This allows for transposing the base frequency by semitones
-        // Example: CV = 0V -> baseHz, CV = +12V -> baseHz * 2, CV = -12V -> baseHz / 2
-        // Note: This is a simplified approach and may not cover all musical nuances
-        // Note: The base frequency is clamped to a minimum of 40Hz to avoid too low frequencies
-        
-        float noteFactor = 1.0f;
-        if (noteCV && fabsf(noteCV[f]) < 6.0f) {
-        float noteV = noteCV[f];
-        noteFactor = powf(2.0f, noteV); // Transpose by note CV
+        // Apply Note CV for hand 1 as octave transposition
+        float noteFactor1 = 1.0f;
+        if (noteCV1 && fabsf(noteCV1[f]) < 6.0f) {
+            float noteV = noteCV1[f];
+            noteFactor1 = powf(2.0f, noteV); // 1V/octave
         }
-        baseHz *= noteFactor; // Transpose base frequency
-        baseHz = fmaxf(baseHz, 40.0f); // Minimum frequency is 40Hz     
-       // Calculate decay with CV and parameter
-        float decayCV = (cvDecay ? cvDecay[f] : 0.0f);
-        float decayMs = self->v[kParamDecay] + decayCV * 8000.0f; // CV skaliert auf 0...8s
-        decayMs = fmaxf(decayMs, 100.0f);
-        float decay = decayMs / 1000.0f;
+        baseHz1 *= noteFactor1;
+        baseHz1 = fmaxf(baseHz1, 40.0f); // Clamp to minimum 40 Hz
 
-        // Calculate excitation type with CV and parameter
+        // --- HAND 2: Calculate base frequency ---
+        float baseHz2 = baseHzParam; // Start with UI base frequency
+        if (cvFreq && fabsf(cvFreq[f]) > 0.01f) {
+            float cv = cvFreq[f];
+            float cvNorm = (cv + 5.0f) / 10.0f;
+            baseHz2 = 40.0f + cvNorm * (4000.0f - 40.0f);
+        }
+        float noteFactor2 = 1.0f;
+        if (noteCV2 && fabsf(noteCV2[f]) < 6.0f) {
+            float noteV = noteCV2[f];
+            noteFactor2 = powf(2.0f, noteV);
+        }
+        baseHz2 *= noteFactor2;
+        baseHz2 = fmaxf(baseHz2, 40.0f);
+
+        // --- Calculate decay (shared for both hands, can be split if needed) ---
+        float decayCV = (cvDecay ? cvDecay[f] : 0.0f); // Decay CV input
+        float decayMs = decayParam + decayCV * 8000.0f; // Scale CV to 0..8s
+        decayMs = fmaxf(decayMs, 100.0f); // Minimum 100 ms
+        float decay = decayMs / 1000.0f;  // Convert ms to seconds
+
+        // --- Calculate excitation type (shared, can be split if needed) ---
         int excType = excTypeParam;
         if (cvExcit && fabsf(cvExcit[f]) > 0.01f) {
             excType = static_cast<int>(fminf(cvExcit[f] * 4.99f, 4.0f));
         }
 
-        // Gate logic: detect rising edge
-        float currentGate = trig[f];
-        bool gateOn = (currentGate >= 0.5f);
+        // --- GATE LOGIC FOR HAND 1 ---
+        float currentGate1 = trig1[f];
+        bool gateOn1 = (currentGate1 >= 0.5f); // Gate is high if >= 0.5
 
-        // On trigger (rising edge), allocate a voice and initialize
-        if (!gateState && gateOn) {
+        // On rising edge: allocate and initialize a voice for hand 1
+        if (!gateState1 && gateOn1) {
+            int voiceToUse = -1;
+            float maxAge = -1.0f;
+            // Find a free or oldest voice
+            for (int v = 0; v < NUM_VOICES; ++v) {
+                if (!self->voices[v].active) {
+                    voiceToUse = v;
+                    break;
+                } else if (self->voices[v].age > maxAge) {
+                    maxAge = self->voices[v].age;
+                    voiceToUse = v;
+                }
+            }
+            Voice& voice = self->voices[voiceToUse];
+            // Generate excitation for this voice
+            voice.excitation.generate(excType, instrType, inharmOn ? inharmAmt : 0.0f, noiseLevel, noiseA, noiseD, noiseS, noiseR);
+            voice.noiseEnv.stage = 1; // Start noise envelope (attack)
+            voice.noiseEnv.pos = 0;
+            voice.noiseEnv.env = 0.0f;
+
+            // Instrument-specific damping
+            float dampingFactor = 1.0f;
+            if (instrType == 3 || instrType == 4) dampingFactor = 0.7f; // Gong/Triangle
+            else if (instrType == 8) decay *= 2.5f; // Timpani
+            else if (instrType == 13) decay *= 2.0f; // Frame Drum
+
+            // Initialize modal resonators for this voice
+            for (int m = 0; m < config.count; ++m) {
+                float freq = baseHz1 * config.ratios[m];
+                if (inharmOn) {
+                    static const float inharmonicOffset[MAX_MODES] = {-0.004f, +0.006f, -0.002f, +0.007f, -0.005f, +0.003f, -0.001f, +0.002f, +0.001f, -0.001f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+                    freq *= (1.0f + inharmAmt * inharmonicOffset[m]);
+                }
+                freq = fminf(freq, SAMPLE_RATE * 0.35f); // Limit to avoid aliasing
+                float gain = config.gains[m];
+                float bw = (1.0f / decay) * (0.4f + 0.6f * m / config.count) * dampingFactor;
+                voice.modes[m].init(freq, gain, bw);
+            }
+            voice.active = true;
+            voice.age = 0.0f;
+        }
+        gateState1 = gateOn1; // Update previous gate state for hand 1
+
+        // --- GATE LOGIC FOR HAND 2 ---
+        float currentGate2 = trig2[f];
+        bool gateOn2 = (currentGate2 >= 0.5f);
+
+        if (!gateState2 && gateOn2) {
             int voiceToUse = -1;
             float maxAge = -1.0f;
             for (int v = 0; v < NUM_VOICES; ++v) {
@@ -568,34 +717,33 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
             }
             Voice& voice = self->voices[voiceToUse];
             voice.excitation.generate(excType, instrType, inharmOn ? inharmAmt : 0.0f, noiseLevel, noiseA, noiseD, noiseS, noiseR);
-            voice.noiseEnv.stage = 1; // Start noise envelope (attack)
+            voice.noiseEnv.stage = 1;
             voice.noiseEnv.pos = 0;
             voice.noiseEnv.env = 0.0f;
 
             float dampingFactor = 1.0f;
-            if (instrType == 3 || instrType == 4) dampingFactor = 0.7f; // Gong/Triangle
-            else if (instrType == 8) decay *= 2.5f; // Timpani
-            else if (instrType == 13) decay *= 2.0f; // Frame Drum
+            if (instrType == 3 || instrType == 4) dampingFactor = 0.7f;
+            else if (instrType == 8) decay *= 2.5f;
+            else if (instrType == 13) decay *= 2.0f;
 
-            float* ratios = config.ratios;
-            float* gains = config.gains;
             for (int m = 0; m < config.count; ++m) {
-                float freq = baseHz * ratios[m];
+                float freq = baseHz2 * config.ratios[m];
                 if (inharmOn) {
                     static const float inharmonicOffset[MAX_MODES] = {-0.004f, +0.006f, -0.002f, +0.007f, -0.005f, +0.003f, -0.001f, +0.002f, +0.001f, -0.001f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
                     freq *= (1.0f + inharmAmt * inharmonicOffset[m]);
                 }
                 freq = fminf(freq, SAMPLE_RATE * 0.35f);
-                float gain = gains[m];
+                float gain = config.gains[m];
                 float bw = (1.0f / decay) * (0.4f + 0.6f * m / config.count) * dampingFactor;
                 voice.modes[m].init(freq, gain, bw);
             }
             voice.active = true;
             voice.age = 0.0f;
         }
+        gateState2 = gateOn2; // Update previous gate state for hand 2
 
-        // On gate off, start noise envelope release for all active voices
-        if (gateState && !gateOn) {
+        // --- GATE OFF: Start noise envelope release for all voices if both gates go low ---
+        if ((!gateState1 && !gateOn1) && (!gateState2 && !gateOn2)) {
             for (int v = 0; v < NUM_VOICES; ++v) {
                 if (self->voices[v].active) {
                     self->voices[v].noiseEnv.stage = 4; // Release
@@ -604,9 +752,7 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
             }
         }
 
-        gateState = gateOn; // Update previous gate state
-
-        // Process all voices
+        // === Process all voices and sum output ===
         float sample = 0.0f;
         for (int v = 0; v < NUM_VOICES; ++v) {
             if (!self->voices[v].active) continue;
@@ -616,18 +762,13 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
             bool silent = true;
             for (int m = 0; m < config.count; ++m) {
                 float s = self->voices[v].modes[m].process(exc, self->v[kParamResonatorType]);
-
-             
                 sum += s;
                 if (fabsf(s) > 0.0005f) silent = false;
             }
 
             // --- CONTINUOUS NOISE LAYER ---
-            // Compute noise envelope for this voice
             float noiseEnv = computeADSR(self->voices[v].noiseEnv, noiseA, noiseD, noiseS, noiseR);
-            // Generate white noise sample in [-1, 1]
             float noise = (((rand() % 2000) / 1000.0f) - 1.0f) * noiseEnv * noiseLevel;
-            // Add noise to output sample
             sample += noise;
 
             if (silent) self->voices[v].active = false; // Deactivate if silent
@@ -635,19 +776,20 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
             self->voices[v].age += 1.0f / SAMPLE_RATE; // Advance voice age
         }
 
-        // Output lowpass filter for smoothing
+        // --- Output lowpass filter for smoothing ---
         float alpha = expf(-2.0f * M_PI * 3000.0f / SAMPLE_RATE);
         sample = self->lpState + alpha * (sample - self->lpState);
         self->lpState = sample;
 
-        // Write output (attenuated)
+        // --- Write output (attenuated) ---
         outL[f] = sample * 0.1f;
         outR[f] = sample * 0.1f;
     }
 
-    self->lastTrigger = gateState; // Store last trigger state
+    // --- Store last trigger states for both hands ---
+    self->lastTrigger1 = gateState1;
+    self->lastTrigger2 = gateState2;
 }
-
 //--------------------------------------------------------------
 // Required Disting NT API functions
 //--------------------------------------------------------------
