@@ -23,6 +23,18 @@
 #define MAX_MODES 16
 #define SAMPLE_RATE NT_globals.sampleRate
 
+
+// Utility function to get CV or parameter value
+// Returns CV value if available and above threshold, otherwise returns parameter value
+// Allows scaling of CV value by a factor (default 1.0) and applies a threshold to avoid noise
+// This is useful for handling CV inputs that may not always be active or reliable
+inline float getCVOrParam(float* cv, int f, float paramValue, float scale = 1.0f, float threshold = 0.001f) {
+    return (cv && fabsf(cv[f]) > threshold) ? (cv[f] * scale) : paramValue;
+}
+
+
+
+
 // Noise table for excitation (not used for per-sample noise)
 float noiseTable[EXCITATION_NOISETABLE_SIZE];
 bool noiseInit = false;
@@ -314,7 +326,7 @@ static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("Trigger", 1, 1)
     NT_PARAMETER_AUDIO_INPUT("Note CV", 1, 2)
     { "Decay", 100, 8000, 1500, kNT_unitMs, kNT_scalingNone, nullptr },
-    { "Base Freq", 2000, 22000, 4400, kNT_unitHz, kNT_scaling100, nullptr },
+    { "Base Freq", 40, 4000, 440, kNT_unitHz, kNT_scalingNone, nullptr },
     { "Instrument", 0, 50, 0, kNT_unitEnum, kNT_scalingNone, instrumentTypes },
     { "Excitation", 0, 16, 0, kNT_unitEnum, kNT_scalingNone, excitationTypes },
     { "Inharm Amt", 0, 100, 20, kNT_unitPercent, kNT_scalingNone, nullptr },
@@ -487,7 +499,7 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     memset(outR, 0, numFrames * sizeof(float));
 
     // Read other parameters
-    float baseHzParam = self->v[kParamBaseFreq]; // Base frequency parameter
+    //TEST.  float baseHzParam = self->v[kParamBaseFreq];  // Base frequency parameter
   
     bool inharmOn = self->v[kParamInharmEnable] > 0;
     float inharmAmt = self->v[kParamInharmLevel] / 100.0f;
@@ -499,12 +511,56 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
 
     for (int f = 0; f < numFrames; ++f) {
         // Calculate base frequency with CV and parameter
+       
+
+    float baseHzParam = self->v[kParamBaseFreq]; // Wert aus UI
+    // TEST.  float baseHz = getCVOrParam(cvFreq, f, baseHzParam); // CV hat Vorrang, sonst UI
+    float baseHz;
+    if (!cvFreq) {
+    baseHz = baseHzParam;
+    } else {
+        float cv = cvFreq[f];
+        // Scale CV from -5V...+5V to 40...4000 Hz
+        float cvNorm = (cv + 5.0f) / 10.0f; // 0...1
+        //baseHz = 40.0f + cvNorm * (4000.0f - 40.0f);
+        baseHz = baseHzParam + (cvNorm * (4000.0f - 40.0f));
+        baseHz = fmaxf(baseHz, 40.0f);
+
+        /*
+        =====OPTION 0-5V====
+        float cvNorm = cv / 5.0f; // 0...1
+        baseHz = 40.0f + cvNorm * (4000.0f - 40.0f);
+        */
+
+
+        /*
+        ====OPTION ADDITION  CV AND PARAMETER====
+        baseHz = baseHzParam + (cvNorm * (4000.0f - 40.0f));
+        aseHz = fmaxf(baseHz, 40.0f);
+
+        */
+    }
+    baseHz = fmaxf(baseHz, 40.0f);    // min. 40 Hz
+    float noteV = getCVOrParam(noteCV, f, 0.0f); // Note CV oder 0
+    float noteFactor = powf(2.0f, noteV);
+    baseHz *= noteFactor;
+ 
+
+    /*
+TEST
         float noteV = noteCV ? noteCV[f] : 0.0f;
         float noteFactor = powf(2.0f, noteV);
         float cvBase = (cvFreq && fabsf(cvFreq[f]) > 0.001f) ? cvFreq[f] : 0.0f;
-        float baseHz = ((cvBase > 0.0f) ? fmaxf(cvBase, 20.0f) : baseHzParam) * noteFactor;
+
+        float baseHz = baseHzParam;
+        //TEST
+        //float baseHz = ((cvBase > 0.0f) ? fmaxf(cvBase, 20.0f) : baseHzParam) * noteFactor;
+
+//TEST
+        //float baseHz = 440.0f; //TEST
+       
         baseHz = fmaxf(baseHz, 40.0f); // Never under 40 Hz
-        // Calculate decay with CV and parameter
+       */ // Calculate decay with CV and parameter
         float decayCV = (cvDecay ? cvDecay[f] : 0.0f);
         float decayMs = self->v[kParamDecay] + decayCV * 8000.0f; // CV skaliert auf 0...8s
         decayMs = fmaxf(decayMs, 100.0f);
