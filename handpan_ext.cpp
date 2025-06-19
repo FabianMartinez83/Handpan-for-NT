@@ -324,7 +324,7 @@ static const char* resonatorTypes[] = {
 
 static const _NT_parameter parameters[] = {
     NT_PARAMETER_AUDIO_INPUT("Trigger", 1, 1)
-    NT_PARAMETER_AUDIO_INPUT("Note CV", 1, 2)
+    NT_PARAMETER_CV_INPUT("Note CV", 1, 2)
     { "Decay", 100, 8000, 1500, kNT_unitMs, kNT_scalingNone, nullptr },
     { "Base Freq", 40, 4000, 440, kNT_unitHz, kNT_scalingNone, nullptr },
     { "Instrument", 0, 50, 0, kNT_unitEnum, kNT_scalingNone, instrumentTypes },
@@ -333,9 +333,9 @@ static const _NT_parameter parameters[] = {
     { "Inharm On", 0, 1, 1, kNT_typeBoolean, kNT_scalingNone, nullptr },
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Out L", 1, 13)
     NT_PARAMETER_AUDIO_OUTPUT_WITH_MODE("Out R", 1, 14)
-    NT_PARAMETER_AUDIO_INPUT("BaseFreq CV", 1, 3)
-    NT_PARAMETER_AUDIO_INPUT("Decay CV", 1, 4)
-    NT_PARAMETER_AUDIO_INPUT("Excit. CV", 1, 5)
+    NT_PARAMETER_CV_INPUT("BaseFreq CV", 1, 3)
+    NT_PARAMETER_CV_INPUT("Decay CV", 1, 4)
+    NT_PARAMETER_CV_INPUT("Excit. CV", 1, 5)
     { "Resonator Type", 0, 5, 0, kNT_unitEnum, kNT_scalingNone, resonatorTypes },
     { "Noise Level", 0, 100, 35, kNT_unitPercent, kNT_scalingNone, nullptr },
     { "Noise A", 1, 512, 64, kNT_unitFrames, kNT_scalingNone, nullptr },
@@ -487,7 +487,7 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
 
     // Get input and output buffers
     float* trig = busFrames + (self->v[kParamTrigger] - 1) * numFrames;
-    float* noteCV = busFrames + (self->v[kParamNoteCV] - 1) * numFrames;
+    float* noteCV = (self->v[kParamNoteCV] ? busFrames + (self->v[kParamNoteCV] - 1) * numFrames : nullptr);
     float* outL = busFrames + (self->v[kParamOutputL] - 1) * numFrames;
     float* outR = busFrames + (self->v[kParamOutputR] - 1) * numFrames;
     float* cvFreq = self->v[kParamBaseFreqCV] ? busFrames + (self->v[kParamBaseFreqCV] - 1) * numFrames : nullptr;
@@ -499,7 +499,7 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     memset(outR, 0, numFrames * sizeof(float));
 
     // Read other parameters
-    //TEST.  float baseHzParam = self->v[kParamBaseFreq];  // Base frequency parameter
+  
   
     bool inharmOn = self->v[kParamInharmEnable] > 0;
     float inharmAmt = self->v[kParamInharmLevel] / 100.0f;
@@ -510,57 +510,34 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     float gateState = self->lastTrigger;            // Previous gate state
 
     for (int f = 0; f < numFrames; ++f) {
-        // Calculate base frequency with CV and parameter
-       
 
-    float baseHzParam = self->v[kParamBaseFreq]; // Wert aus UI
-    // TEST.  float baseHz = getCVOrParam(cvFreq, f, baseHzParam); // CV hat Vorrang, sonst UI
-    float baseHz;
-    if (!cvFreq) {
-    baseHz = baseHzParam;
-    } else {
+        float baseHzParam = self->v[kParamBaseFreq]; // UI-Value in Hz
+        float baseHz = baseHzParam; // Standard: UI-Value
+
+        // if available, it uses CV for base frequency
+        if (cvFreq && fabsf(cvFreq[f]) > 0.01f) {
         float cv = cvFreq[f];
-        // Scale CV from -5V...+5V to 40...4000 Hz
-        float cvNorm = (cv + 5.0f) / 10.0f; // 0...1
-        //baseHz = 40.0f + cvNorm * (4000.0f - 40.0f);
-        baseHz = baseHzParam + (cvNorm * (4000.0f - 40.0f));
-        baseHz = fmaxf(baseHz, 40.0f);
-
-        /*
-        =====OPTION 0-5V====
-        float cvNorm = cv / 5.0f; // 0...1
+        float cvNorm = (cv + 5.0f) / 10.0f;  // normiert -5V...+5V auf 0...1
         baseHz = 40.0f + cvNorm * (4000.0f - 40.0f);
-        */
+        }
 
-
-        /*
-        ====OPTION ADDITION  CV AND PARAMETER====
-        baseHz = baseHzParam + (cvNorm * (4000.0f - 40.0f));
-        aseHz = fmaxf(baseHz, 40.0f);
-
-        */
-    }
-    baseHz = fmaxf(baseHz, 40.0f);    // min. 40 Hz
-    float noteV = getCVOrParam(noteCV, f, 0.0f); // Note CV oder 0
-    float noteFactor = powf(2.0f, noteV);
-    baseHz *= noteFactor;
- 
-
-    /*
-TEST
-        float noteV = noteCV ? noteCV[f] : 0.0f;
-        float noteFactor = powf(2.0f, noteV);
-        float cvBase = (cvFreq && fabsf(cvFreq[f]) > 0.001f) ? cvFreq[f] : 0.0f;
-
-        float baseHz = baseHzParam;
-        //TEST
-        //float baseHz = ((cvBase > 0.0f) ? fmaxf(cvBase, 20.0f) : baseHzParam) * noteFactor;
-
-//TEST
-        //float baseHz = 440.0f; //TEST
-       
-        baseHz = fmaxf(baseHz, 40.0f); // Never under 40 Hz
-       */ // Calculate decay with CV and parameter
+       // if available it transposes the base frequency by note CV
+        // Note CV: Transpose base frequency by note CV
+        // Note: CV is expected to be in the range -5V to +5V, where 0V is the base frequency
+        // Transpose by a factor of 2^(CV/12) to match musical intervals
+        // This allows for transposing the base frequency by semitones
+        // Example: CV = 0V -> baseHz, CV = +12V -> baseHz * 2, CV = -12V -> baseHz / 2
+        // Note: This is a simplified approach and may not cover all musical nuances
+        // Note: The base frequency is clamped to a minimum of 40Hz to avoid too low frequencies
+        
+        float noteFactor = 1.0f;
+        if (noteCV && fabsf(noteCV[f]) < 6.0f) {
+        float noteV = noteCV[f];
+        noteFactor = powf(2.0f, noteV); // Transpose by note CV
+        }
+        baseHz *= noteFactor; // Transpose base frequency
+        baseHz = fmaxf(baseHz, 40.0f); // Minimum frequency is 40Hz     
+       // Calculate decay with CV and parameter
         float decayCV = (cvDecay ? cvDecay[f] : 0.0f);
         float decayMs = self->v[kParamDecay] + decayCV * 8000.0f; // CV skaliert auf 0...8s
         decayMs = fmaxf(decayMs, 100.0f);
@@ -639,6 +616,8 @@ TEST
             bool silent = true;
             for (int m = 0; m < config.count; ++m) {
                 float s = self->voices[v].modes[m].process(exc, self->v[kParamResonatorType]);
+
+             
                 sum += s;
                 if (fabsf(s) > 0.0005f) silent = false;
             }
