@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <new>
+#include <cstdio>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
@@ -57,10 +58,16 @@ struct ModalResonator {
     float y1 = 0.0f, y2 = 0.0f; // Previous outputs (for difference equation)
     float a1 = 0.0f, a2 = 0.0f; // Filter coefficients
     float r = 0.0f;             // Pole radius (for coefficient calculation)
+    // --- NEU: Für Frequenz-Glide ---
+    float freqCurrent = 0.0f;     // Aktuelle Frequenz (wird geglidet)
+    float freqTarget = 0.0f;      // Ziel-Frequenz nach Trigger
+    float freqGlideStep = 0.0f;   // Schrittweite pro Sample
+    int freqGlideSamples = 0;     // Wie viele Samples gleiten?
+    int freqGlidePos = 0;         // Aktuelle Glide-Position
 
     // Initialize the resonator (call on trigger)
-    void init(float f, float g, float bw, int type = 0) {
-        freq = f;
+    void init(float f, float g, float bw, bool doGlide = false, int glideSamples = 32, int type = 0) {
+        //freq = f;
         gain = g;
         // For "damped" type, increase bandwidth for a shorter, woodier sound
         if (type == 3) bw *= 1.5f;
@@ -69,12 +76,45 @@ struct ModalResonator {
         age = 0.0f;
         y1 = 0.0f;
         y2 = 0.0f;
+        // --- NEU: freqCurrent beim allerersten Mal korrekt setzen ---
+        if (freqCurrent == 0.0f) {
+        freqCurrent = f;
+        }
+
+        if (doGlide && fabsf(f - freqCurrent) > 0.01f) {
+        freqTarget = f;
+        freqGlideSamples = glideSamples;
+        freqGlidePos = 0;
+        freqGlideStep = (f - freqCurrent) / (float)glideSamples;
+        // freqCurrent bleibt auf altem Wert!
+        } else {
+        freqCurrent = f;
+        freqTarget = f;
+        freqGlideSamples = 0;
+        freqGlidePos = 0;
+        freqGlideStep = 0.0f;
+        }
+
+        // Filterkoeffizienten für freqCurrent berechnen
         r = expf(-M_PI * bandwidth / SAMPLE_RATE);
-        a1 = -2.0f * r * cosf(2.0f * M_PI * freq / SAMPLE_RATE);
+        a1 = -2.0f * r * cosf(2.0f * M_PI * freqCurrent / SAMPLE_RATE);
         a2 = r * r;
+
+        
+
+
     }
 
 float process(float x, int type = 0) {
+    // --- NEU: Frequenz-Glide pro Sample ---
+    if (freqGlidePos < freqGlideSamples) {
+        freqCurrent += freqGlideStep;
+        freqGlidePos++;
+        // Filterkoeffizienten für neue freqCurrent berechnen
+        r = expf(-M_PI * bandwidth / SAMPLE_RATE);
+        a1 = -2.0f * r * cosf(2.0f * M_PI * freqCurrent / SAMPLE_RATE);
+        a2 = r * r;
+    }
     switch (type) {
         case 0: // Standard: classic 2nd-order resonator
             break;
@@ -246,22 +286,126 @@ struct Excitation {
         if (instrType == 3 || instrType == 4) {
             for (int i = 0; i < 16; ++i) buffer[i] += 0.05f * sinf(i * 0.4f);
         }
-
+        // --- NEU: Excitation-Level abhängig von Inharmonicity ---
+        float inharmFactor = 1.0f - 0.5f * inharmonicity; // z.B. 50% weniger bei maximaler Inharmonicity
+        if (inharmFactor < 0.5f) inharmFactor = 0.5f;     // Minimum 50% (optional, für Sicherheit)
+        for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i) {
+        buffer[i] *= inharmFactor;
+        }
+        //---NEU: Excitation noch sanfter filtern ---
+        float prev = 0.0f;
+        for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i) {
+        buffer[i] = 0.7f * buffer[i] + 0.3f * prev;
+        prev = buffer[i];
+        }
         // Optional: add inharmonicity to the excitation (not continuous noise)
         if (inharmonicity > 0.0f) {
             for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i)
                 buffer[i] *= 1.0f + 0.002f * inharmonicity * sinf(i * 0.1f);
         }
+        // --- NEU: Phasenrandomisierung der Excitation ---
+       
+/* 
+        //TEST
+         if (inharmonicity > 0.0f) {
+            float phase = (M_PI / 2) + ((rand() % 1000) / 1000.0f) *0.5f;
 
-        // Ensure at least 3 nonzero values
-        if (buffer[0] == 0.0f && buffer[1] == 0.0f && buffer[2] == 0.0f) {
-            buffer[0] = 0.2f;
-            buffer[1] = 0.4f;
-            buffer[2] = 0.6f;
+            //float phase = ((rand() % 1000) / 1000.0f) * 2.0f * M_PI; // Random phase 0..2pi
+            float phaseStep = 0.01f; // Wie schnell die Phase pro Sample weiterläuft (kannst du anpassen)
+            for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i) {
+                float s = sinf(phase + i * phaseStep);
+                if (i < 4 && fabsf(s) < 0.1f) s = copysignf(0.1f, s); // Verhindere Nahe-Null-Impulse am Anfang
+                buffer[i] *= s;
+            }
+
         }
+
+//original code folgt:
+
+
+        if (inharmonicity > 0.0f) {
+            float phase = ((rand() % 1000) / 1000.0f) * 2.0f * M_PI; // Random phase 0..2pi
+            float phaseStep = 0.01f; // Wie schnell die Phase pro Sample weiterläuft (kannst du anpassen)
+                for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i) {
+                buffer[i] *= sinf(phase + i * phaseStep);
+                }
+        } 
+
+
+
+
+
+*/
+//original code leicht verändert folgt:
+
+
+        if (inharmonicity > 0.0f) {
+            float phase = ((rand() % 1000) / 1000.0f) * 2.0f * M_PI; // Random phase 0..2pi
+            float phaseStep = 0.01f; // Wie schnell die Phase pro Sample weiterläuft (kannst du anpassen)
+                for (int i = 0; i < EXCITATION_BUFFER_SIZE; ++i) {
+                buffer[i] *= 1.0f + 0.1f * sinf(phase + i * phaseStep);
+
+                }
+        } 
+
+/* weiterer Test
+
+    // Ensure at least 3 nonzero values
+        if (buffer[0] == 0.0f && buffer[1] == 0.0f && buffer[2] == 0.0f) {
+            buffer[0] = 0.1f;
+            buffer[1] = 0.2f;
+            buffer[2] = 0.3f;
+        }
+    
+
+
+
+
+*/
+
+        if (fabsf(buffer[0]) < 0.001f && fabsf(buffer[1]) < 0.001f) {
+            buffer[0] = 0.2f;
+            buffer[1] = 0.1f;
+        }
+
     }
 };
+// AR envelope for excitation
+struct ExcitationAR {
+    int stage = 0; // 0=idle, 1=attack, 2=release
+    int pos = 0;
+    int attackSamples = 8;   // Default: 8 Samples (ca. 0.17 ms @48kHz)
+    int releaseSamples = 32; // Default: 32 Samples (ca. 0.67 ms @48kHz)
+    float env = 0.0f;
 
+    void trigger(int a, int r) {
+        stage = 1;
+        pos = 0;
+        attackSamples = a;
+        releaseSamples = r;
+        env = 0.0f;
+    }
+
+    float next() {
+        if (stage == 1) { // Attack
+            env = 0.7f + 0.3f * ((float)pos / attackSamples);
+            pos++;
+            if (pos >= attackSamples) {
+            stage = 2;
+            pos = 0;
+            }
+        
+        } else if (stage == 2) { // Release
+            env = 1.0f - (float)pos / releaseSamples;
+            pos++;
+            if (pos >= releaseSamples) {
+                stage = 0;
+                env = 0.0f;
+            }
+        }
+        return env;
+    }
+};
 //--------------------------------------------------------------
 // Envelope: generic ADSR envelope
 //--------------------------------------------------------------
@@ -282,6 +426,7 @@ struct Voice {
     Excitation excitation;              // Excitation buffer
     Envelope ampEnv;                    // Amplitude envelope (not used here)
     Envelope noiseEnv;                  // Noise envelope (for continuous noise)
+    ExcitationAR excitationAR;          // AR envelope for excitation
 };
 
 //--------------------------------------------------------------
@@ -320,7 +465,9 @@ enum {
     kParamNoiseAttack,
     kParamNoiseDecay,
     kParamNoiseSustain,
-    kParamNoiseRelease
+    kParamNoiseRelease,
+    kParamExcitationAttack,
+    kParamExcitationRelease
 };
 
 static const char* instrumentTypes[] = {
@@ -428,10 +575,12 @@ static const _NT_parameter parameters[] = {
     { "Noise D", 1, 1024, 128, kNT_unitFrames, kNT_scalingNone, nullptr },
     { "Noise S", 0, 100, 30, kNT_unitPercent, kNT_scalingNone, nullptr },
     { "Noise R", 1, 2048, 256, kNT_unitFrames, kNT_scalingNone, nullptr },
+    { "Exciter Attack", 1, 128, 8, kNT_unitFrames, kNT_scalingNone, nullptr },
+    { "Exciter Release", 1, 256, 32, kNT_unitFrames, kNT_scalingNone, nullptr },
 };
 
 static const uint8_t page1[] = { kParamTrigger1, kParamTrigger2, kParamNoteCV1, kParamNoteCV2, kParamDecay, kParamBaseFreq };
-static const uint8_t page2[] = { kParamInstrumentType, kParamExcitationType, kParamInharmLevel, kParamInharmEnable, kParamNoiseLevel, kParamNoiseAttack, kParamNoiseDecay, kParamNoiseSustain, kParamNoiseRelease };
+static const uint8_t page2[] = { kParamInstrumentType, kParamExcitationType, kParamInharmLevel, kParamInharmEnable, kParamNoiseLevel, kParamNoiseAttack, kParamNoiseDecay, kParamNoiseSustain, kParamNoiseRelease,kParamExcitationAttack,kParamExcitationRelease };
 static const uint8_t page3[] = { kParamOutputL, kParamOutputModeL, kParamOutputR, kParamOutputModeR };
 static const uint8_t page4[] = { kParamBaseFreqCV, kParamDecayCV, kParamExcitationCV };
 static const uint8_t page5[] = { kParamResonatorType };
@@ -582,17 +731,19 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     float* outR = busFrames + (self->v[kParamOutputR] - 1) * numFrames;
 
     // === Read UI parameters ===
-    float baseHzParam = self->v[kParamBaseFreq];           // Base frequency from UI (Hz)
-    float decayParam  = self->v[kParamDecay];              // Decay time from UI (ms)
-    int instrType     = self->v[kParamInstrumentType];     // Instrument type (Handpan, Gong, etc.)
-    int excTypeParam  = self->v[kParamExcitationType];     // Excitation type from UI
-    bool inharmOn     = self->v[kParamInharmEnable] > 0;   // Inharmonicity enable
-    float inharmAmt   = self->v[kParamInharmLevel] / 100.0f; // Inharmonicity amount (0..1)
-    float noiseLevel  = self->v[kParamNoiseLevel] / 100.0f;  // Noise level (0..1)
-    int noiseA        = self->v[kParamNoiseAttack];        // Noise envelope attack (samples)
-    int noiseD        = self->v[kParamNoiseDecay];         // Noise envelope decay (samples)
-    int noiseR        = self->v[kParamNoiseRelease];       // Noise envelope release (samples)
-    float noiseS      = self->v[kParamNoiseSustain] / 100.0f; // Noise envelope sustain (0..1)
+    float baseHzParam = self->v[kParamBaseFreq];                 // Base frequency from UI (Hz)
+    float decayParam  = self->v[kParamDecay];                    // Decay time from UI (ms)
+    int instrType     = self->v[kParamInstrumentType];           // Instrument type (Handpan, Gong, etc.)
+    int excTypeParam  = self->v[kParamExcitationType];           // Excitation type from UI
+    bool inharmOn     = self->v[kParamInharmEnable] > 0;         // Inharmonicity enable
+    float inharmAmt   = self->v[kParamInharmLevel] / 100.0f;     // Inharmonicity amount (0..1)
+    float noiseLevel  = self->v[kParamNoiseLevel] / 100.0f;      // Noise level (0..1)
+    int noiseA        = self->v[kParamNoiseAttack];              // Noise envelope attack (samples)
+    int noiseD        = self->v[kParamNoiseDecay];               // Noise envelope decay (samples)
+    int noiseR        = self->v[kParamNoiseRelease];             // Noise envelope release (samples)
+    float noiseS      = self->v[kParamNoiseSustain] / 100.0f;    // Noise envelope sustain (0..1)
+    int excitAttack = self->v[kParamExcitationAttack];           // Exciter attack time
+    int excitRelease = self->v[kParamExcitationRelease];         // Exciter release time
 
     // Get modal configuration for the selected instrument
     ModalConfig config = getModalConfig(instrType);
@@ -672,6 +823,8 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
             Voice& voice = self->voices[voiceToUse];
             // Generate excitation for this voice
             voice.excitation.generate(excType, instrType, inharmOn ? inharmAmt : 0.0f, noiseLevel, noiseA, noiseD, noiseS, noiseR);
+            // Starte AR-Hüllkurve mit gewünschten Attack/Release-Werten (z.B. 8/32 Samples)
+            voice.excitationAR.trigger(excitAttack, excitRelease);
             voice.noiseEnv.stage = 1; // Start noise envelope (attack)
             voice.noiseEnv.pos = 0;
             voice.noiseEnv.env = 0.0f;
@@ -692,7 +845,10 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
                 freq = fminf(freq, SAMPLE_RATE * 0.35f); // Limit to avoid aliasing
                 float gain = config.gains[m];
                 float bw = (1.0f / decay) * (0.4f + 0.6f * m / config.count) * dampingFactor;
-                voice.modes[m].init(freq, gain, bw);
+                // --- NEU: Frequenz-Glide nur wenn Inharmonicity aktiv ist ---
+                bool doGlide = (inharmOn && inharmAmt > 0.0f);
+                int glideSamples = 32; // z.B. 32 Samples = ca. 0.7 ms bei 48 kHz
+                voice.modes[m].init(freq, gain, bw, doGlide, glideSamples, self->v[kParamResonatorType]);
             }
             voice.active = true;
             voice.age = 0.0f;
@@ -717,6 +873,8 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
             }
             Voice& voice = self->voices[voiceToUse];
             voice.excitation.generate(excType, instrType, inharmOn ? inharmAmt : 0.0f, noiseLevel, noiseA, noiseD, noiseS, noiseR);
+            // Starte AR-Hüllkurve mit gewünschten Attack/Release-Werten (z.B. 8/32 Samples)
+            voice.excitationAR.trigger(excitAttack, excitRelease);
             voice.noiseEnv.stage = 1;
             voice.noiseEnv.pos = 0;
             voice.noiseEnv.env = 0.0f;
@@ -735,7 +893,10 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
                 freq = fminf(freq, SAMPLE_RATE * 0.35f);
                 float gain = config.gains[m];
                 float bw = (1.0f / decay) * (0.4f + 0.6f * m / config.count) * dampingFactor;
-                voice.modes[m].init(freq, gain, bw);
+                // --- NEU: Frequenz-Glide nur wenn Inharmonicity aktiv ist ---
+                bool doGlide = (inharmOn && inharmAmt > 0.0f);
+                int glideSamples = 32; // z.B. 32 Samples = ca. 0.7 ms bei 48 kHz
+                voice.modes[m].init(freq, gain, bw, doGlide, glideSamples, self->v[kParamResonatorType]);
             }
             voice.active = true;
             voice.age = 0.0f;
@@ -756,8 +917,7 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
         float sample = 0.0f;
         for (int v = 0; v < NUM_VOICES; ++v) {
             if (!self->voices[v].active) continue;
-            float exc = self->voices[v].excitation.next(); // Get next excitation sample
-
+            float exc = self->voices[v].excitation.next() * self->voices[v].excitationAR.next(); // Get excitation signal for this voice
             float sum = 0.0f;
             bool silent = true;
             for (int m = 0; m < config.count; ++m) {
@@ -781,6 +941,10 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
         sample = self->lpState + alpha * (sample - self->lpState);
         self->lpState = sample;
 
+        // --- Output-Limiter/Softclip ---
+       // if (sample > 1.0f) sample = 1.0f + 0.1f * (sample - 1.0f);
+        //if (sample < -1.0f) sample = -1.0f + 0.1f * (sample + 1.0f);
+
         // --- Write output (attenuated) ---
         outL[f] = sample * 0.1f;
         outR[f] = sample * 0.1f;
@@ -790,6 +954,35 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     self->lastTrigger1 = gateState1;
     self->lastTrigger2 = gateState2;
 }
+
+
+
+//--------------------------------------------------------------
+// Draw function for the algorithm (optional, can be empty)
+bool draw(_NT_algorithm* base) {
+    ModalInstrument* self = static_cast<ModalInstrument*>(base);
+
+    char line[32];
+
+    // Konstanter TEST-Text – sollte immer erscheinen
+    NT_drawText(0, 10, "TEST"); // Zeile 0
+
+    // Ausgabe der Frequenzdifferenz zur Diagnose
+    for (int m = 0; m < 4; ++m) { // Nur die ersten 4 Resonatoren anzeigen
+        const ModalResonator& res = self->voices[0].modes[m];
+        float delta = res.freqTarget - res.freqCurrent;
+
+        snprintf(line, sizeof(line), "M%d ΔF: %.2f", m, delta);
+        NT_drawText(0, 20 * m, line); // 0,20,40,60,80 
+    }
+
+    return true;
+}
+
+
+
+
+
 //--------------------------------------------------------------
 // Required Disting NT API functions
 //--------------------------------------------------------------
@@ -814,7 +1007,7 @@ static const _NT_factory factory = {
     .construct = construct,
     .parameterChanged = parameterChanged,
     .step = step,
-    .draw = nullptr,
+    .draw = draw,
     .midiRealtime = nullptr,
     .midiMessage = nullptr,
     .tags = kNT_tagInstrument
