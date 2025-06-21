@@ -2,16 +2,17 @@
 
 Attempt to create a "realistic" Handpan algorithm for the Disting NT<br>
 
-# ATTENTION THE PLUGIN WORKS NOT EXACTLY THE WAY I WANT IT TO DO
-# Slowly it is becoming a stable version, last tests needed 
+# VERSION 1.0.0 release
+# Last tests ended Sat 21 June 2025 enjoy the algo
 <br>
--18 June 2025 added another version, it works but I have to figure out why it clicks at each gate
+-21 Jun 2025 release the stable v.1.0.0 with and without UI. I had no time to write a User Manual, sorry 
 <br>
--19 june 2025 tests ongoing on Base Freq CV input, solved one issue and created another one, as usual 
+you will not need a User Manual it's very simple to figure out how to use this algo.
+<br> 
+IN1 & IN2 are Gate In, IN3 & IN4 are Note CV In. OUT 1 & 2 for Stereo out
 <br>
--19 June2025 fixed Cv ins, some test are still needed but it seems usable
+IN5 is for a CV Fader to change the Base frequency, IN6 CV in for the Decay, IN7 fo the Exciter 
 <br>
--19 June 2025 added 2 Trig/Gate ins and 2 Note CV ins to simulate a two hands instrument
+I reccomend to use CV faders or smooth LFO, I also reccomend to not use high Tempo to trigger the gates
 <br>
-like it is in reality, also added a few different resonators and made minor fixes.
-
+Handpan is a Instrument that is played gently and therefore I reccomend to do it also with that algo.

@@ -1,4 +1,4 @@
-// Disting NT Plugin - Advanced Modal Percussion Synth with no UI (No Inharmonicity)
+// Disting NT Plugin - Advanced Modal Percussion Synth (No Inharmonicity)
 // Author: Fabian Martinez (with the help from Windsurf,ChatGPT-4o, ChatGPT-4.1 andGitHub Copilot)
 // copyright: (C) 2025 Fabian Martinez
 //
@@ -1050,6 +1050,50 @@ extern "C" void step(_NT_algorithm* base, float* busFrames, int numFramesBy4) {
     self->lastTrigger1 = gateState1;
     self->lastTrigger2 = gateState2;
 }
+extern "C" bool draw(_NT_algorithm* base) {
+    ModalInstrument* self = static_cast<ModalInstrument*>(base);
+
+
+
+    // --- Noise Envelope Value Bar ---
+    float envVal = self->noiseEnv.env;
+    NT_drawText(180, 54, "N.Env:", 14, kNT_textLeft, kNT_textTiny);
+    NT_drawShapeI(kNT_rectangle, 180, 56, 180 + (int)(envVal * 60), 62, 14);
+
+    // --- Exciter AR Curve (simple) ---
+    NT_drawText(162, 20, "AR:", 14, kNT_textLeft, kNT_textNormal);
+    int x0 = 182, y0 = 10;
+    int A = self->v[kParamExcitationAttack] / 10 ;   
+    int R = self->v[kParamExcitationRelease] / 10 ;
+    //int total = A + R + 20;
+    int x = x0, y = y0 + 30;
+    // Attack
+    NT_drawShapeI(kNT_line, x, y, x + A, y - 25, 8);
+    x += A; y -= 25;
+    // Release
+    NT_drawShapeI(kNT_line, x, y, x + R, y + 25 , 8);
+
+
+
+   // --- Voices bar with numbers ---
+    NT_drawText(5, 18, "Voices", 14, kNT_textLeft, kNT_textTiny);
+    NT_drawText(5, 25, " 1 2 3 4 5 6 7 8", 14, kNT_textLeft, kNT_textTiny);
+    
+    int activeVoices = 0;
+    for (int v = 0; v < NUM_VOICES; ++v) {
+        if (self->voices[v].active)
+            activeVoices++;
+    }
+    const int maxWidth = 74;
+    int barWidth = (int)((activeVoices / (float)NUM_VOICES) * maxWidth);
+    NT_drawShapeI(kNT_rectangle, 5, 26, 5 + barWidth, 34, 14);
+
+  
+    NT_drawText(128, 62, "HandpanModalXT2", 15, kNT_textCentre, kNT_textNormal);
+
+    // Return false to allow standard parameter line at top
+    return false;
+}
 
 // Required Disting NT API functions
 extern "C" void parameterChanged(_NT_algorithm*, int) {}
@@ -1062,9 +1106,9 @@ extern "C" void calculateRequirements(_NT_algorithmRequirements& req, const int3
 }
 
 static const _NT_factory factory = {
-    .guid = NT_MULTICHAR('H','A','N','D'),
-    .name = "HandpanModalXT",
-    .description = "Modal Perc Synth",
+    .guid = NT_MULTICHAR('H','A','N','X'),
+    .name = "HandpanModalXT2",
+    .description = "Modal Perc Synth (No Inharmonicity)",
     .numSpecifications = 0,
     .specifications = nullptr,
     .calculateStaticRequirements = nullptr,
@@ -1073,7 +1117,7 @@ static const _NT_factory factory = {
     .construct = construct,
     .parameterChanged = parameterChanged,
     .step = step,
-    .draw = nullptr,
+    .draw = draw,
     .midiRealtime = nullptr,
     .midiMessage = nullptr,
     .tags = kNT_tagInstrument
